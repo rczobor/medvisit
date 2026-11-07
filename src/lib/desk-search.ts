@@ -1,0 +1,39 @@
+import type { Id } from "../../convex/_generated/dataModel"
+import { isLocalDate } from "../../convex/lib/time"
+import type { LocalDate } from "../../convex/lib/time"
+
+/**
+ * URL state of the front desk: which site and day are open, and which sheet.
+ * Keeping it in the URL makes every view linkable and lets Back close a sheet.
+ */
+export type DeskSearch = {
+  site?: Id<"sites">
+  date?: LocalDate
+  /** Open appointment details. */
+  appointment?: Id<"appointments">
+  /** Open the booking sheet, for a resource or for any ("any"). */
+  book?: Id<"resources"> | "any"
+  /** Preferred start time for the booking sheet, `HH:MM`. */
+  at?: string
+}
+
+const text = (value: unknown) =>
+  typeof value === "string" && value !== "" ? value : undefined
+
+/**
+ * The trust boundary for URL state. Ids are only shaped here; the backend
+ * validates them, and stale ids resolve to nothing rather than to an error.
+ */
+export function validateDeskSearch(
+  search: Record<string, unknown>
+): DeskSearch {
+  const date = text(search.date)
+  const at = text(search.at)
+  return {
+    site: text(search.site) as Id<"sites"> | undefined,
+    date: date && isLocalDate(date) ? date : undefined,
+    appointment: text(search.appointment) as Id<"appointments"> | undefined,
+    book: text(search.book) as Id<"resources"> | "any" | undefined,
+    at: at && /^([01]\d|2[0-3]):[0-5]\d$/.test(at) ? at : undefined,
+  }
+}

@@ -1,0 +1,27 @@
+# Local self-hosted Convex for development and the on-prem demo. Ports and the
+# volume are separate from MedReport's so the two never share data.
+name: medvisit
+
+services:
+  convex-backend:
+    image: ${CONVEX_BACKEND_IMAGE:-ghcr.io/convex/convex-backend@sha256:207cf95def42f01614b6e3af0af5c20d0dcaa5ff2adf258ee7bc9555576644fa}
+    restart: unless-stopped
+    stop_grace_period: 10s
+    stop_signal: SIGINT
+    ports:
+      - "${CONVEX_BACKEND_PORT:-127.0.0.1:3410}:3210"
+      - "${CONVEX_SITE_PROXY_PORT:-127.0.0.1:3411}:3211"
+    volumes:
+      - convex-data:/convex/data
+    environment:
+      CONVEX_CLOUD_ORIGIN: "${CONVEX_CLOUD_ORIGIN:-http://127.0.0.1:3410}"
+      CONVEX_SITE_ORIGIN: "${CONVEX_SITE_ORIGIN:-http://127.0.0.1:3411}"
+      DISABLE_METRICS_ENDPOINT: "true"
+      RUST_LOG: "${RUST_LOG:-info}"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3210/version"]
+      interval: 5s
+      start_period: 10s
+
+volumes:
+  convex-data:
