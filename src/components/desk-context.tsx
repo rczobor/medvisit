@@ -7,6 +7,8 @@ export type Desk = {
   date: LocalDate
   today: LocalDate
   now: number
+  /** The appointment whose details are open, if any. */
+  selectedAppointment: Id<"appointments"> | null
   openAppointment: (appointmentId: Id<"appointments">) => void
   openBooking: (resourceId?: Id<"resources">, at?: string) => void
 }

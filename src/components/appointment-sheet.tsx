@@ -67,7 +67,7 @@ export function AppointmentSheet({
       open={appointmentId !== null}
       onOpenChange={(open) => !open && onClose()}
     >
-      <SheetContent className="w-full gap-0 data-[side=right]:sm:max-w-md">
+      <SheetContent className="gap-0 data-[side=right]:sm:max-w-md">
         {shown.current && <AppointmentDetails appointmentId={shown.current} />}
       </SheetContent>
     </Sheet>
@@ -79,7 +79,7 @@ function AppointmentDetails({
 }: {
   appointmentId: Id<"appointments">
 }) {
-  const { today } = useDesk()
+  const { today, now } = useDesk()
   const appointment = useQuery(api.schedule.appointment, { appointmentId })
   const setStatus = useMutation(api.schedule.setStatus)
   const [pending, setPending] = useState<AppointmentStatus | null>(null)
@@ -108,14 +108,20 @@ function AppointmentDetails({
   const currentYear = parseLocalDate(today).year
   const appointmentDay = instantToZoned(appointment.startAt).date
   const isFutureDay = appointmentDay > today
+  // Mirrors the backend: visit outcomes need the day to have come, and a
+  // no-show needs the start time to have passed.
   const actions = nextStatuses(status).filter(
     (to) =>
       !(
         isFutureDay &&
         (to === "arrived" || to === "completed" || to === "noShow")
-      )
+      ) && !(to === "noShow" && appointment.startAt > now)
   )
   const forward = actions.find((to) => to === "arrived" || to === "completed")
+  const noShowLater =
+    !isFutureDay &&
+    nextStatuses(status).includes("noShow") &&
+    appointment.startAt > now
 
   async function change(to: AppointmentStatus, cancelReason?: string) {
     setPending(to)
@@ -278,6 +284,11 @@ function AppointmentDetails({
                 {transitionLabel(status, to)}
               </Button>
             ))}
+          {noShowLater && (
+            <p className="w-full text-xs text-muted-foreground">
+              Nem jelent meg: {formatTime(appointment.startAt)} után rögzíthető.
+            </p>
+          )}
         </div>
       )}
 

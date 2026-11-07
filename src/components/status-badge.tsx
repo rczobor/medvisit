@@ -1,13 +1,25 @@
 import { cn } from "cn"
+import {
+  CheckCheckIcon,
+  CheckIcon,
+  ClockIcon,
+  UserXIcon,
+  XIcon,
+} from "lucide-react"
+import type { LucideIcon } from "lucide-react"
 import type { AppointmentStatus } from "../../convex/lib/appointmentStatus"
 import { statusLabel } from "@/lib/labels"
 
-const dot: Record<AppointmentStatus, string> = {
-  booked: "bg-status-booked",
-  arrived: "bg-status-arrived",
-  completed: "bg-status-completed",
-  noShow: "bg-status-noshow",
-  cancelled: "border border-status-cancelled bg-transparent",
+/** One icon per status, shared by the board, the list and the details sheet. */
+export const statusIcon: Record<
+  AppointmentStatus,
+  { icon: LucideIcon; className: string }
+> = {
+  booked: { icon: ClockIcon, className: "text-status-booked" },
+  arrived: { icon: CheckIcon, className: "text-status-arrived" },
+  completed: { icon: CheckCheckIcon, className: "text-muted-foreground" },
+  noShow: { icon: UserXIcon, className: "text-status-noshow" },
+  cancelled: { icon: XIcon, className: "text-status-cancelled" },
 }
 
 export function StatusBadge({
@@ -17,6 +29,7 @@ export function StatusBadge({
   status: AppointmentStatus
   className?: string
 }) {
+  const { icon: Icon, className: iconClassName } = statusIcon[status]
   return (
     <span
       className={cn(
@@ -24,10 +37,7 @@ export function StatusBadge({
         className
       )}
     >
-      <span
-        className={cn("size-2 shrink-0 rounded-full", dot[status])}
-        aria-hidden
-      />
+      <Icon className={cn("size-3.5 shrink-0", iconClassName)} aria-hidden />
       {statusLabel[status]}
     </span>
   )

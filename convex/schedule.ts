@@ -290,6 +290,9 @@ export const setStatus = mutation({
     const appointmentDay = instantToZoned(appointment.startAt).date
     if (visitStatus && appointmentDay > todayInClinic(Date.now()))
       fail("INVALID_TRANSITION")
+    // A patient can't miss a visit that hasn't started yet.
+    if (to === "noShow" && appointment.startAt > Date.now())
+      fail("INVALID_TRANSITION")
 
     // Undoing a no-show takes the slot back, and someone may have booked it.
     if (!occupiesSlot(from) && occupiesSlot(to)) {

@@ -1,9 +1,8 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useMutation } from "convex/react"
 import { api } from "../../convex/_generated/api"
 import type { Id } from "../../convex/_generated/dataModel"
 import { formatTaj, isValidTaj, normalizeTaj } from "../../convex/lib/taj"
-import { Button } from "@/components/ui/button"
 import {
   Field,
   FieldError,
@@ -62,16 +61,23 @@ function validate(values: Values, sex: Sex | null, today: string): Errors {
   return errors
 }
 
+/**
+ * The new-patient form. Its submit and cancel buttons are rendered by the
+ * caller in the sheet footer (associated through `id`), so they sit at the
+ * sheet's bottom edge on every screen size.
+ */
 export function PatientForm({
+  id,
   initialText,
   today,
   onCreated,
-  onCancel,
+  onSavingChange,
 }: {
+  id: string
   initialText: string
   today: string
   onCreated: (patient: PatientSummary) => void
-  onCancel: () => void
+  onSavingChange: (saving: boolean) => void
 }) {
   const create = useMutation(api.patients.create)
   const [values, setValues] = useState<Values>({
@@ -81,6 +87,13 @@ export function PatientForm({
   const [sex, setSex] = useState<Sex | null>(null)
   const [errors, setErrors] = useState<Errors>({})
   const [saving, setSaving] = useState(false)
+  const formRef = useRef<HTMLFormElement>(null)
+
+  // On phones the booking controls fill the screen above the form; show the
+  // form itself (its section heading sits just above it) once it opens.
+  useEffect(() => {
+    formRef.current?.scrollIntoView({ block: "start" })
+  }, [])
 
   const field = (name: keyof Values) => ({
     id: `patient-${name}`,
@@ -92,10 +105,12 @@ export function PatientForm({
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
+    if (saving) return
     const found = validate(values, sex, today)
     setErrors(found)
     if (Object.keys(found).length > 0 || !sex) return
     setSaving(true)
+    onSavingChange(true)
     const taj = normalizeTaj(values.taj)
     try {
       const patientId = await create({
@@ -126,11 +141,14 @@ export function PatientForm({
       )
     } finally {
       setSaving(false)
+      onSavingChange(false)
     }
   }
 
   return (
     <form
+      ref={formRef}
+      id={id}
       onSubmit={submit}
       noValidate
       className="flex flex-col gap-4 rounded-md border bg-muted/40 p-3"
@@ -172,58 +190,66 @@ export function PatientForm({
           />
           {errors.birthDate && <FieldError>{errors.birthDate}</FieldError>}
         </Field>
-        <Field>
-          <FieldLabel htmlFor="patient-taj">TAJ-szám</FieldLabel>
-          <Input
-            {...field("taj")}
-            inputMode="numeric"
-            autoComplete="off"
-            placeholder="000 000 000"
-            className="tabular"
-            onBlur={() => {
-              const taj = normalizeTaj(values.taj)
-              if (isValidTaj(taj))
-                setValues((previous) => ({ ...previous, taj: formatTaj(taj) }))
-            }}
-          />
-          {errors.taj && <FieldError>{errors.taj}</FieldError>}
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="patient-phone">Telefonszám</FieldLabel>
-          <Input
-            {...field("phone")}
-            type="tel"
-            autoComplete="off"
-            placeholder="+36 30 123 4567"
-          />
-        </Field>
-        <Field className="col-span-2">
-          <FieldLabel htmlFor="patient-email">E-mail-cím</FieldLabel>
-          <Input {...field("email")} type="email" autoComplete="off" />
-          {errors.email && <FieldError>{errors.email}</FieldError>}
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="patient-birthPlace">Születési hely</FieldLabel>
-          <Input {...field("birthPlace")} autoComplete="off" />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="patient-mothersName">Anyja neve</FieldLabel>
-          <Input {...field("mothersName")} autoComplete="off" />
-        </Field>
       </FieldGroup>
+      {/* Required fields come first; the optional ones share one label instead
+          of a marker on each, which wrapped badly at phone width. */}
+      <fieldset className="flex flex-col border-t pt-3">
+        {/* float + full width keeps the legend in the flow, not in the border. */}
+        <legend className="float-left mb-3 w-full text-sm font-medium">
+          Kiegészítő adatok{" "}
+          <span className="font-normal text-muted-foreground">
+            (nem kötelező)
+          </span>
+        </legend>
+        <FieldGroup className="grid grid-cols-2 gap-3">
+          <Field>
+            <FieldLabel htmlFor="patient-taj">TAJ-szám</FieldLabel>
+            <Input
+              {...field("taj")}
+              inputMode="numeric"
+              autoComplete="off"
+              placeholder="000 000 000"
+              className="tabular"
+              onBlur={() => {
+                const taj = normalizeTaj(values.taj)
+                if (isValidTaj(taj))
+                  setValues((previous) => ({
+                    ...previous,
+                    taj: formatTaj(taj),
+                  }))
+              }}
+            />
+            {errors.taj && <FieldError>{errors.taj}</FieldError>}
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="patient-phone">Telefonszám</FieldLabel>
+            <Input
+              {...field("phone")}
+              type="tel"
+              autoComplete="off"
+              placeholder="+36 30 123 4567"
+            />
+          </Field>
+          <Field className="col-span-2">
+            <FieldLabel htmlFor="patient-email">E-mail-cím</FieldLabel>
+            <Input {...field("email")} type="email" autoComplete="off" />
+            {errors.email && <FieldError>{errors.email}</FieldError>}
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="patient-birthPlace">Születési hely</FieldLabel>
+            <Input {...field("birthPlace")} autoComplete="off" />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="patient-mothersName">Anyja neve</FieldLabel>
+            <Input {...field("mothersName")} autoComplete="off" />
+          </Field>
+        </FieldGroup>
+      </fieldset>
       {errors.form && (
         <p role="alert" className="text-sm text-destructive">
           {errors.form}
         </p>
       )}
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="ghost" onClick={onCancel}>
-          Mégse
-        </Button>
-        <Button type="submit" disabled={saving}>
-          Páciens mentése
-        </Button>
-      </div>
     </form>
   )
 }

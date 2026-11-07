@@ -63,6 +63,7 @@ function DeskLayout() {
     date: search.date ?? today,
     today,
     now,
+    selectedAppointment: search.appointment ?? null,
     openAppointment: (appointmentId) =>
       update({ appointment: appointmentId, book: undefined, at: undefined }),
     openBooking: (resourceId, at) =>

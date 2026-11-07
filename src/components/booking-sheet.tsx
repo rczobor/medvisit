@@ -1,7 +1,7 @@
 import { useRef, useState } from "react"
 import { useMutation, useQuery } from "convex/react"
 import { cn } from "cn"
-import { DropletIcon, UserPlusIcon } from "lucide-react"
+import { ClockIcon, DropletIcon, InfoIcon, UserPlusIcon } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "../../convex/_generated/api"
 import type { Id } from "../../convex/_generated/dataModel"
@@ -72,11 +72,11 @@ export function BookingSheet({
 
   return (
     <Sheet open={request !== null} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent className="w-full gap-0 data-[side=right]:sm:max-w-lg">
+      <SheetContent className="gap-0 data-[side=right]:sm:max-w-lg">
         <SheetHeader className="border-b">
           <SheetTitle className="text-lg font-semibold">Új foglalás</SheetTitle>
           <SheetDescription>
-            Válasszon vizsgálatot, időpontot és pácienst.
+            A rögzített foglalás azonnal megjelenik a napi táblán.
           </SheetDescription>
         </SheetHeader>
         {shown.current && (
@@ -114,7 +114,10 @@ function BookingForm({
   const [note, setNote] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [savingPatient, setSavingPatient] = useState(false)
+  const [resultsOpen, setResultsOpen] = useState(false)
   const book = useMutation(api.schedule.book)
+  const patientSection = useRef<HTMLElement>(null)
 
   const day = useQuery(api.schedule.day, { siteId: desk.site._id, date })
   const resources = day?.resources ?? []
@@ -181,7 +184,8 @@ function BookingForm({
 
   return (
     <>
-      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-4">
+      {/* Scroll padding keeps a focused field clear of the footer's edge. */}
+      <div className="flex min-h-0 flex-1 scroll-py-6 flex-col gap-5 overflow-y-auto p-4">
         <div className="grid grid-cols-2 gap-3">
           <Field>
             <FieldLabel htmlFor="booking-resource">Naptár</FieldLabel>
@@ -273,23 +277,25 @@ function BookingForm({
           className="flex flex-col gap-2"
         >
           <h3 id="booking-slots" className="text-sm font-medium">
-            Szabad időpontok
+            Időpont
           </h3>
           <SlotPicker
             hasService={selectedService !== null}
             loading={selectedService !== null && slots === undefined}
             starts={starts}
             selected={start}
+            selectedEnd={end}
             onSelect={setPickedStart}
           />
         </section>
 
         <section
+          ref={patientSection}
           aria-labelledby="booking-patient"
           className="flex flex-col gap-2"
         >
           <h3 id="booking-patient" className="text-sm font-medium">
-            Páciens
+            {creatingPatient !== null ? "Új páciens" : "Páciens"}
           </h3>
           {patient ? (
             <div className="flex items-center gap-3 rounded-md border bg-card px-3 py-2">
@@ -312,23 +318,34 @@ function BookingForm({
             </div>
           ) : creatingPatient !== null ? (
             <PatientForm
+              id="new-patient-form"
               initialText={creatingPatient}
               today={desk.today}
               onCreated={(created) => {
                 setPatient(created)
                 setCreatingPatient(null)
               }}
-              onCancel={() => setCreatingPatient(null)}
+              onSavingChange={setSavingPatient}
             />
           ) : (
             <PatientSearch
+              anchor={patientSection}
+              opensUp={start === null}
+              onOpenChange={setResultsOpen}
               onSelect={setPatient}
               onCreate={setCreatingPatient}
             />
           )}
         </section>
 
-        <Field>
+        {/* Hidden while patient results are open, which would otherwise
+            sit over it; it is empty at that point in nearly every booking. */}
+        <Field
+          className={cn(
+            resultsOpen && "invisible",
+            creatingPatient !== null && "hidden"
+          )}
+        >
           <FieldLabel htmlFor="booking-note">Megjegyzés</FieldLabel>
           <Textarea
             id="booking-note"
@@ -340,26 +357,52 @@ function BookingForm({
         </Field>
       </div>
 
-      <SheetFooter className="gap-3 border-t bg-card">
+      {/* While the new-patient form is open, the footer holds its actions. */}
+      {creatingPatient !== null && (
+        <SheetFooter className="border-t bg-card">
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setCreatingPatient(null)}>
+              Mégse
+            </Button>
+            <Button
+              type="submit"
+              form="new-patient-form"
+              disabled={savingPatient}
+            >
+              {savingPatient && <Spinner />}
+              Páciens mentése
+            </Button>
+          </div>
+        </SheetFooter>
+      )}
+      <SheetFooter
+        className={cn(
+          "gap-3 border-t bg-card",
+          creatingPatient !== null && "hidden"
+        )}
+      >
         {error && (
           <p role="alert" className="text-sm text-destructive">
             {error}
           </p>
         )}
         <div className="flex items-center gap-3">
+          {/* Restates what is chosen so far, then the next missing step. */}
           <p className="min-w-0 flex-1 text-sm">
-            {ready ? (
+            {resource && selectedService && start !== null && end !== null && (
               <>
                 <span className="block font-medium first-letter:uppercase">
                   {formatDay(instantToZoned(start).date, currentYear)},{" "}
                   {formatTimeRange(start, end)}
                 </span>
-                <span className="block truncate text-muted-foreground">
-                  {resource.name}, {selectedService.name}
+                <span className="block truncate">
+                  {selectedService.name}, {resource.name}
                 </span>
               </>
-            ) : (
-              <span className="text-muted-foreground">
+            )}
+            {!ready && (
+              <span className="mt-0.5 flex items-center gap-1.5 text-muted-foreground">
+                <InfoIcon className="size-3.5 shrink-0" aria-hidden />
                 {!selectedService
                   ? "Válasszon vizsgálatot."
                   : start === null
@@ -384,19 +427,27 @@ const dayParts = [
   { label: "Este", until: 24 * 60 },
 ]
 
+/**
+ * Free start times, grouped by part of day. Once a time is chosen the grid
+ * folds to one row, so the patient step moves up and nothing lies under the
+ * patient search results.
+ */
 function SlotPicker({
   hasService,
   loading,
   starts,
   selected,
+  selectedEnd,
   onSelect,
 }: {
   hasService: boolean
   loading: boolean
   starts: number[]
   selected: number | null
+  selectedEnd: number | null
   onSelect: (start: number) => void
 }) {
+  const [expanded, setExpanded] = useState(false)
   if (!hasService) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -410,6 +461,20 @@ function SlotPicker({
       <p className="text-sm text-muted-foreground">
         Ezen a napon nincs szabad időpont. Válasszon másik napot vagy naptárt.
       </p>
+    )
+  }
+
+  if (selected !== null && selectedEnd !== null && !expanded) {
+    return (
+      <div className="flex items-center gap-3 rounded-md border bg-card px-3 py-1.5">
+        <ClockIcon className="size-4 text-muted-foreground" aria-hidden />
+        <span className="flex-1 font-semibold tabular">
+          {formatTimeRange(selected, selectedEnd)}
+        </span>
+        <Button variant="outline" size="sm" onClick={() => setExpanded(true)}>
+          Módosítás
+        </Button>
+      </div>
     )
   }
 
@@ -441,7 +506,10 @@ function SlotPicker({
                   variant={start === selected ? "default" : "outline"}
                   aria-pressed={start === selected}
                   className={cn("tabular", start === selected && "shadow-sm")}
-                  onClick={() => onSelect(start)}
+                  onClick={() => {
+                    onSelect(start)
+                    setExpanded(false)
+                  }}
                 >
                   {formatTime(start)}
                 </Button>
@@ -454,9 +522,20 @@ function SlotPicker({
 }
 
 function PatientSearch({
+  anchor,
+  opensUp,
+  onOpenChange,
   onSelect,
   onCreate,
 }: {
+  /** With `opensUp`, results open above this element so its label stays visible. */
+  anchor: React.RefObject<HTMLElement | null>
+  /**
+   * The field sits low while the slot grid is open, so results open upward;
+   * once a slot is chosen the grid folds and they open below the field.
+   */
+  opensUp: boolean
+  onOpenChange: (open: boolean) => void
   onSelect: (patient: PatientSummary) => void
   onCreate: (text: string) => void
 }) {
@@ -475,6 +554,7 @@ function PatientSearch({
         value={null}
         onValueChange={(value) => value && onSelect(value)}
         onInputValueChange={setText}
+        onOpenChange={(open) => onOpenChange(open)}
         itemToStringLabel={(item) => `${item.familyName} ${item.givenName}`}
         isItemEqualToValue={(item, value) => item._id === value._id}
       >
@@ -484,7 +564,12 @@ function PatientSearch({
           showTrigger={false}
           className="min-w-0 flex-1"
         />
-        <ComboboxContent>
+        {/* Results arrive after the list opens, so it must open where the
+            full list fits: see `opensUp`. */}
+        <ComboboxContent
+          side={opensUp ? "top" : "bottom"}
+          anchor={opensUp ? anchor : undefined}
+        >
           <ComboboxEmpty>
             {text.trim().length < 2
               ? "Írjon be legalább két karaktert."
@@ -497,9 +582,10 @@ function PatientSearch({
                   <span className="block truncate font-medium">
                     {item.familyName} {item.givenName}
                   </span>
-                  <span className="block text-xs text-muted-foreground tabular">
-                    {formatDate(item.birthDate)}
-                    {item.taj && `, TAJ: ${formatTaj(item.taj)}`}
+                  <span className="flex flex-wrap gap-x-3 text-[13px] text-muted-foreground tabular">
+                    <span>{formatDate(item.birthDate)}</span>
+                    {item.taj && <span>TAJ: {formatTaj(item.taj)}</span>}
+                    {item.phone && <span>{item.phone}</span>}
                   </span>
                 </span>
               </ComboboxItem>

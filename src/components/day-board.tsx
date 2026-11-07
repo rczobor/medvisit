@@ -3,8 +3,6 @@ import { useQuery } from "convex/react"
 import type { FunctionReturnType } from "convex/server"
 import { cn } from "cn"
 import {
-  CheckCheckIcon,
-  CheckIcon,
   DropletIcon,
   GlobeIcon,
   HandshakeIcon,
@@ -20,6 +18,7 @@ import {
   zonedTimeToInstant,
 } from "../../convex/lib/time"
 import { useDesk } from "@/components/desk-context"
+import { statusIcon } from "@/components/status-badge"
 import {
   Empty,
   EmptyDescription,
@@ -67,12 +66,31 @@ export function DayBoard() {
     const key = `${site._id}/${date}`
     if (!range || !scrollRef.current || scrolledFor.current === key) return
     scrolledFor.current = key
-    const target = isToday ? minutesOf(now) - 60 : range.start
+    let target = isToday ? minutesOf(now) - 60 : range.start
+    // Start at the top of any block the edge would cut through, so its time
+    // and patient name stay visible.
+    // Moving up can cut another column's block, so repeat until none is cut.
+    const spans = (day?.appointments ?? [])
+      .filter((appointment) => appointment.status !== "cancelled")
+      .map((appointment) => {
+        const start = minutesOf(appointment.startAt)
+        return {
+          start,
+          end: start + (appointment.endAt - appointment.startAt) / MINUTE_MS,
+        }
+      })
+    for (
+      let cut = spans.find((s) => s.start < target && target < s.end);
+      cut;
+    ) {
+      target = cut.start
+      cut = spans.find((s) => s.start < target && target < s.end)
+    }
     scrollRef.current.scrollTop = Math.max(
       0,
       (target - range.start) * PX_PER_MINUTE
     )
-  }, [site._id, date, range, isToday, now])
+  }, [site._id, date, range, isToday, now, day])
 
   if (day === undefined) {
     return (
@@ -97,8 +115,14 @@ export function DayBoard() {
   }
 
   const height = (range.end - range.start) * PX_PER_MINUTE
+  // A calendar closed for the day keeps only a narrow labelled column.
   const columns = {
-    gridTemplateColumns: `4rem repeat(${day.resources.length}, minmax(13rem, 1fr))`,
+    gridTemplateColumns: [
+      "4rem",
+      ...day.resources.map((resource) =>
+        resource.working.length > 0 ? "minmax(13rem, 1fr)" : "8rem"
+      ),
+    ].join(" "),
   }
   const nowMinutes = minutesOf(now)
   const showNow =
@@ -294,9 +318,16 @@ function AppointmentBlock({
   top: number
   height: number
 }) {
-  const { openAppointment } = useDesk()
+  const { openAppointment, selectedAppointment, now, date, today } = useDesk()
   const { status } = appointment
   if (status === "cancelled") return null
+  const selected = appointment._id === selectedAppointment
+  // The now-line runs under blocks (rule 6), so a block that spans now gets a
+  // laser notch on its status bar instead, clear of the text.
+  const spansNow =
+    date === today && appointment.startAt <= now && now < appointment.endAt
+  const nowOffset =
+    ((now - appointment.startAt) / MINUTE_MS) * PX_PER_MINUTE - 1
   const compact = height < 42
   const name = appointment.patient?.name ?? "Ismeretlen páciens"
   const service = appointment.service?.name ?? "Törölt vizsgálat"
@@ -305,16 +336,28 @@ function AppointmentBlock({
     <button
       type="button"
       onClick={() => openAppointment(appointment._id)}
+      aria-current={selected ? "true" : undefined}
       aria-label={`${formatTimeRange(appointment.startAt, appointment.endAt)}, ${name}, ${service}, ${statusLabel[status]}`}
       className={cn(
-        "absolute inset-x-1 flex flex-col overflow-hidden rounded-sm border border-l-[3px] border-transparent px-2 text-left outline-none hover:brightness-[0.97] focus-visible:ring-2 focus-visible:ring-ring dark:hover:brightness-110",
+        "absolute inset-x-1 flex flex-col overflow-hidden rounded-sm border border-l-[3px] border-transparent px-2 text-left outline-none hover:brightness-[0.97] focus-visible:z-[16] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card dark:hover:brightness-110",
         compact ? "justify-center py-0" : "py-1",
         blockStyle[status],
         // A no-show releases its slot; a rebooking on top of it must stay readable.
-        occupiesSlot(status) ? "z-10" : "z-0"
+        occupiesSlot(status) ? "z-10" : "z-[2]",
+        // The block whose details are open stays marked while staff work in the sheet.
+        // Layering: now-line 1 < no-show 2 < booked 10 < selected 15 <
+        // focused 16 < sticky gutter 20, now label 25, header 30.
+        selected && "z-[15] shadow-md ring-2 ring-primary"
       )}
       style={{ top: top + 1, height: Math.max(height - 2, 14) }}
     >
+      {spansNow && (
+        <span
+          className="pointer-events-none absolute left-0 h-[3px] w-1.5 -translate-y-1/2 bg-laser"
+          style={{ top: nowOffset }}
+          aria-hidden
+        />
+      )}
       <span className="flex min-w-0 items-center gap-1.5 text-[13px] leading-tight">
         <span className="shrink-0 text-xs text-muted-foreground tabular">
           {formatTime(appointment.startAt)}
@@ -322,16 +365,21 @@ function AppointmentBlock({
         <span
           className={cn(
             "truncate font-semibold",
+            // On one-line blocks the name yields at most part of the line to the exam.
+            compact && "max-w-[60%] shrink-0",
             status === "noShow" && "line-through decoration-1"
           )}
         >
           {name}
         </span>
+        {compact && (
+          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+            {service}
+          </span>
+        )}
         <span className="ml-auto flex shrink-0 items-center gap-1 text-muted-foreground [&_svg]:size-3.5">
-          {status === "arrived" && (
-            <CheckIcon className="text-status-arrived" aria-hidden />
-          )}
-          {status === "completed" && <CheckCheckIcon aria-hidden />}
+          {/* Booked is the default and carries no icon; the rest match the list. */}
+          {status !== "booked" && <StatusIcon status={status} />}
           {appointment.service?.contrast && (
             <DropletIcon aria-label="Kontrasztanyagos" />
           )}
@@ -355,6 +403,11 @@ function AppointmentBlock({
   )
 }
 
+function StatusIcon({ status }: { status: Appointment["status"] }) {
+  const { icon: Icon, className } = statusIcon[status]
+  return <Icon className={className} aria-hidden />
+}
+
 function NowLine({
   minutes,
   rangeStart,
@@ -363,16 +416,28 @@ function NowLine({
   rangeStart: number
 }) {
   const top = (minutes - rangeStart) * PX_PER_MINUTE
+  // The line runs under appointment blocks: drawn across their text it reads
+  // as a strikethrough, which means "cancelled". The label sits above the
+  // time gutter.
   return (
-    <div
-      className="pointer-events-none absolute inset-x-0 z-[25]"
-      style={{ top }}
-      aria-hidden
-    >
-      <div className="h-px bg-laser shadow-[0_0_6px_1px_var(--laser)]" />
-      <span className="absolute top-0 left-1 -translate-y-1/2 rounded-sm bg-laser px-1.5 py-px text-[11px] font-semibold text-white tabular">
+    <>
+      <div
+        className="pointer-events-none absolute inset-x-0 z-[1] h-px bg-laser shadow-[0_0_6px_1px_var(--laser)]"
+        style={{ top }}
+        aria-hidden
+      />
+      <div
+        className="pointer-events-none absolute left-0 z-[25] h-px w-16 bg-laser"
+        style={{ top }}
+        aria-hidden
+      />
+      <span
+        className="pointer-events-none absolute left-1 z-[25] -translate-y-1/2 rounded-sm bg-laser px-1.5 py-px text-[11px] font-semibold text-laser-foreground tabular"
+        style={{ top }}
+        aria-hidden
+      >
         {clock(minutes)}
       </span>
-    </div>
+    </>
   )
 }

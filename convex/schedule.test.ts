@@ -172,6 +172,22 @@ describe("setStatus", () => {
     ).rejects.toMatchObject({ data: { code: "SLOT_TAKEN" } })
   })
 
+  test("a no-show can't be recorded before the visit starts", async () => {
+    const { staff, resourceId, serviceId, patientId } = await setup()
+    const appointmentId = await staff.mutation(api.schedule.book, {
+      resourceId,
+      serviceId,
+      patientId,
+      startAt: at("09:00"),
+    })
+    await expect(
+      staff.mutation(api.schedule.setStatus, {
+        appointmentId,
+        status: "noShow",
+      })
+    ).rejects.toMatchObject({ data: { code: "INVALID_TRANSITION" } })
+  })
+
   test("arrival can't be recorded for a future day", async () => {
     // convex-test reads the clock when the harness is created, so set it first.
     vi.setSystemTime(zonedTimeToInstant("2030-01-06", "12:00"))
