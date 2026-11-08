@@ -4,8 +4,10 @@ import { mutation, query } from "./_generated/server"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
 import {
   MAX_APPOINTMENT_MINUTES,
+  MAX_CLOSURE_DAYS,
   availableStarts,
   checkPlacement,
+  subtractIntervals,
   workingIntervals,
 } from "./lib/availability"
 import type { Interval } from "./lib/availability"
@@ -14,6 +16,7 @@ import { requireStaff } from "./lib/auth"
 import { fail } from "./lib/errors"
 import {
   MINUTE_MS,
+  addDays,
   dayBounds,
   instantToZoned,
   isLocalDate,
@@ -24,6 +27,8 @@ import type { LocalDate } from "./lib/time"
 import { appointmentStatus, localDate } from "./validators"
 
 const MAX_APPOINTMENT_MS = MAX_APPOINTMENT_MINUTES * MINUTE_MS
+/** A day of margin covers a closure that spans a daylight-saving change. */
+const CLOSURE_SCAN_MS = (MAX_CLOSURE_DAYS + 1) * 24 * 60 * MINUTE_MS
 /** Clock skew allowed when booking a slot that is just starting. */
 const PAST_GRACE_MS = 5 * MINUTE_MS
 
@@ -32,6 +37,12 @@ function requireDate(date: string): LocalDate {
   return date
 }
 
+/**
+ * A resource's day: its weekly `hours`, the `closures` that overlap the day,
+ * and the `working` time left between them. The closure read spans every
+ * closure that could reach into the day, so a closure added concurrently
+ * conflicts with a booking that relies on the time being open.
+ */
 async function workingDay(
   ctx: QueryCtx,
   resourceId: Id<"resources">,
@@ -43,7 +54,28 @@ async function workingDay(
       q.eq("resourceId", resourceId).eq("weekday", isoWeekday(date))
     )
     .take(20)
-  return workingIntervals(rules, date)
+  const { start, end } = dayBounds(date)
+  // Read in full: the time window bounds the scan, and a closure left
+  // unread would count as open time.
+  const closures = []
+  for await (const closure of ctx.db
+    .query("closures")
+    .withIndex("by_resourceId_and_startAt", (q) =>
+      q
+        .eq("resourceId", resourceId)
+        .gt("startAt", start - CLOSURE_SCAN_MS)
+        .lt("startAt", end)
+    )) {
+    if (closure.endAt <= start) continue
+    const { _id, startAt, endAt, reason } = closure
+    closures.push({ _id, startAt, endAt, reason })
+  }
+  const hours = workingIntervals(rules, date)
+  const working = subtractIntervals(
+    hours,
+    closures.map((closure) => ({ start: closure.startAt, end: closure.endAt }))
+  )
+  return { hours, closures, working }
 }
 
 /**
@@ -107,7 +139,7 @@ export const day = query({
         _id: resource._id,
         name: resource.name,
         kind: resource.kind,
-        working: await workingDay(ctx, resource._id, date),
+        ...(await workingDay(ctx, resource._id, date)),
       }))
     )
 
@@ -188,9 +220,25 @@ export const slots = query({
       args.serviceId
     )
     const { start, end } = dayBounds(date)
+    // Closures count as busy rather than shortening the hours, so the slot
+    // grid stays anchored to the weekly hours after a closure ends off-grid.
+    const { hours, closures } = await workingDay(ctx, args.resourceId, date)
+    const busy = await busyIntervals(
+      ctx,
+      args.resourceId,
+      start,
+      end,
+      args.ignore
+    )
     const starts = availableStarts({
-      working: await workingDay(ctx, args.resourceId, date),
-      busy: await busyIntervals(ctx, args.resourceId, start, end, args.ignore),
+      working: hours,
+      busy: [
+        ...busy,
+        ...closures.map((closure) => ({
+          start: closure.startAt,
+          end: closure.endAt,
+        })),
+      ],
       durationMinutes,
       stepMinutes: resource.slotStepMinutes,
     })
@@ -227,7 +275,8 @@ async function claimTime(
 
   const endAt = startAt + durationMinutes * MINUTE_MS
   const placement = checkPlacement({
-    working: await workingDay(ctx, resourceId, instantToZoned(startAt).date),
+    working: (await workingDay(ctx, resourceId, instantToZoned(startAt).date))
+      .working,
     busy: await busyIntervals(ctx, resourceId, startAt, endAt, ignore),
     start: startAt,
     end: endAt,
@@ -338,6 +387,94 @@ export const reschedule = mutation({
         fromResourceId: appointment.resourceId,
         startAt,
         resourceId: resource._id,
+      },
+    })
+    return null
+  },
+})
+
+/**
+ * Closes calendars for a time, on top of their weekly hours. Bookings already
+ * in the window stay; the result says how many need moving.
+ */
+export const addClosure = mutation({
+  args: {
+    resourceIds: v.array(v.id("resources")),
+    startAt: v.number(),
+    endAt: v.number(),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const staff = await requireStaff(ctx)
+    const { startAt, endAt } = args
+    const reason = args.reason.trim()
+    const resourceIds = [...new Set(args.resourceIds)]
+    const lastDay = addDays(instantToZoned(startAt).date, MAX_CLOSURE_DAYS - 1)
+    if (
+      !reason ||
+      reason.length > 80 ||
+      resourceIds.length === 0 ||
+      resourceIds.length > 50 ||
+      !Number.isInteger(startAt / MINUTE_MS) ||
+      !Number.isInteger(endAt / MINUTE_MS) ||
+      endAt <= startAt ||
+      instantToZoned(endAt - 1).date > lastDay
+    ) {
+      fail("INVALID_INPUT")
+    }
+    if (endAt <= Date.now()) fail("IN_PAST")
+
+    let affected = 0
+    for (const resourceId of resourceIds) {
+      const resource = await ctx.db.get("resources", resourceId)
+      if (!resource) fail("NOT_FOUND")
+      const closureId = await ctx.db.insert("closures", {
+        resourceId,
+        startAt,
+        endAt,
+        reason,
+        createdBy: staff._id,
+      })
+      await audit(ctx, {
+        actorId: staff._id,
+        action: "closure.added",
+        details: { closureId, resourceId, startAt, endAt, reason },
+      })
+      // Counted in full: a month-long closure on a busy calendar can cover
+      // more bookings than the bounded overlap read returns.
+      for await (const appointment of ctx.db
+        .query("appointments")
+        .withIndex("by_resourceId_and_startAt", (q) =>
+          q
+            .eq("resourceId", resourceId)
+            .gt("startAt", startAt - MAX_APPOINTMENT_MS)
+            .lt("startAt", endAt)
+        )) {
+        if (appointment.endAt > startAt && occupiesSlot(appointment.status))
+          affected++
+      }
+    }
+    return { affected }
+  },
+})
+
+/** Reopens the time of a closure; its weekly hours become bookable again. */
+export const removeClosure = mutation({
+  args: { closureId: v.id("closures") },
+  handler: async (ctx, { closureId }) => {
+    const staff = await requireStaff(ctx)
+    const closure = await ctx.db.get("closures", closureId)
+    if (!closure) fail("NOT_FOUND")
+    await ctx.db.delete("closures", closureId)
+    await audit(ctx, {
+      actorId: staff._id,
+      action: "closure.removed",
+      details: {
+        closureId,
+        resourceId: closure.resourceId,
+        startAt: closure.startAt,
+        endAt: closure.endAt,
+        reason: closure.reason,
       },
     })
     return null

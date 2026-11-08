@@ -339,3 +339,102 @@ describe("reschedule", () => {
     ).rejects.toMatchObject({ data: { code: "NOT_MOVABLE" } })
   })
 })
+
+describe("closures", () => {
+  test("a closure blocks booking until it is removed, and reports bookings inside it", async () => {
+    const { staff, siteId, resourceId, serviceId, patientId } = await setup()
+    const booking = { resourceId, serviceId, patientId }
+    await staff.mutation(api.schedule.book, {
+      ...booking,
+      startAt: at("10:00"),
+    })
+
+    const { affected } = await staff.mutation(api.schedule.addClosure, {
+      resourceIds: [resourceId],
+      startAt: at("09:30"),
+      endAt: at("11:00"),
+      reason: "Karbantartás",
+    })
+    expect(affected).toBe(1)
+
+    await expect(
+      staff.mutation(api.schedule.book, { ...booking, startAt: at("09:15") })
+    ).rejects.toMatchObject({ data: { code: "OUTSIDE_HOURS" } })
+    const { starts } = await staff.query(api.schedule.slots, {
+      resourceId,
+      serviceId,
+      date: day,
+    })
+    expect(starts).toContain(at("09:00"))
+    expect(starts).not.toContain(at("09:15"))
+    expect(starts).not.toContain(at("10:30"))
+    expect(starts).toContain(at("11:00"))
+
+    const board = await staff.query(api.schedule.day, { siteId, date: day })
+    const [closure] = board.resources[0].closures
+    expect(closure).toMatchObject({ reason: "Karbantartás" })
+    expect(board.resources[0].hours).toEqual([
+      { start: at("08:00"), end: at("12:00") },
+    ])
+
+    await staff.mutation(api.schedule.removeClosure, {
+      closureId: closure._id,
+    })
+    await staff.mutation(api.schedule.book, {
+      ...booking,
+      startAt: at("09:15"),
+    })
+  })
+
+  test("after a closure that ends off the grid, the grid times stay", async () => {
+    const { t, staff, resourceId, serviceId } = await setup()
+    await t.run((ctx) =>
+      ctx.db.patch("resources", resourceId, { slotStepMinutes: 15 })
+    )
+    await staff.mutation(api.schedule.addClosure, {
+      resourceIds: [resourceId],
+      startAt: at("08:30"),
+      endAt: at("09:10"),
+      reason: "Karbantartás",
+    })
+    const { starts } = await staff.query(api.schedule.slots, {
+      resourceId,
+      serviceId,
+      date: day,
+    })
+    expect(starts).toEqual(
+      expect.arrayContaining([at("09:10"), at("09:15"), at("09:30")])
+    )
+    expect(starts).not.toContain(at("09:25"))
+  })
+
+  test("a closure that started days earlier still closes the day", async () => {
+    const { staff, resourceId, serviceId, patientId } = await setup()
+    await staff.mutation(api.schedule.addClosure, {
+      resourceIds: [resourceId],
+      startAt: zonedTimeToInstant("2030-01-01", "00:00"),
+      endAt: zonedTimeToInstant("2030-01-10", "00:00"),
+      reason: "Szabadság",
+    })
+    await expect(
+      staff.mutation(api.schedule.book, {
+        resourceId,
+        serviceId,
+        patientId,
+        startAt: at("10:00"),
+      })
+    ).rejects.toMatchObject({ data: { code: "OUTSIDE_HOURS" } })
+  })
+
+  test("rejects closures longer than the limit", async () => {
+    const { staff, resourceId } = await setup()
+    await expect(
+      staff.mutation(api.schedule.addClosure, {
+        resourceIds: [resourceId],
+        startAt: zonedTimeToInstant("2030-01-07", "00:00"),
+        endAt: zonedTimeToInstant("2030-02-08", "00:00"),
+        reason: "Felújítás",
+      })
+    ).rejects.toMatchObject({ data: { code: "INVALID_INPUT" } })
+  })
+})

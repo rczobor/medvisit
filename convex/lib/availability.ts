@@ -17,6 +17,12 @@ export type WorkingRule = { weekday: number; start: WallTime; end: WallTime }
  */
 export const MAX_APPOINTMENT_MINUTES = 8 * 60
 
+/**
+ * The longest single closure. Reads of a day's closures scan back this far,
+ * so it bounds them; a longer break is entered as several closures.
+ */
+export const MAX_CLOSURE_DAYS = 31
+
 /** Merges overlapping or touching intervals into a sorted, disjoint list. */
 export function mergeIntervals(intervals: readonly Interval[]): Interval[] {
   const sorted = intervals

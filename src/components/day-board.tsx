@@ -1,23 +1,31 @@
-import { useEffect, useLayoutEffect, useRef } from "react"
-import { useQuery } from "convex/react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useMutation, useQuery } from "convex/react"
 import type { FunctionReturnType } from "convex/server"
 import { cn } from "cn"
 import {
+  CalendarOffIcon,
   DropletIcon,
   GlobeIcon,
   HandshakeIcon,
+  LockIcon,
   MessageSquareTextIcon,
   PlusIcon,
 } from "lucide-react"
+import { toast } from "sonner"
 import { api } from "../../convex/_generated/api"
-import { subtractIntervals } from "../../convex/lib/availability"
+import {
+  mergeIntervals,
+  subtractIntervals,
+} from "../../convex/lib/availability"
 import type { Interval } from "../../convex/lib/availability"
 import { occupiesSlot } from "../../convex/lib/appointmentStatus"
 import {
   MINUTE_MS,
   instantToZoned,
+  parseLocalDate,
   zonedTimeToInstant,
 } from "../../convex/lib/time"
+import { ClosureDialog } from "@/components/closure-dialog"
 import { useDesk } from "@/components/desk-context"
 import { statusIcon } from "@/components/status-badge"
 import {
@@ -26,13 +34,23 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@/components/ui/empty"
+import { Button } from "@/components/ui/button"
+import {
+  Popover,
+  PopoverContent,
+  PopoverDescription,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
-import { formatTime, formatTimeRange } from "@/lib/format"
-import { sourceLabel, statusLabel } from "@/lib/labels"
+import { formatDay, formatTime, formatTimeRange } from "@/lib/format"
+import { errorMessage, sourceLabel, statusLabel } from "@/lib/labels"
 
 type Day = FunctionReturnType<typeof api.schedule.day>
 type Resource = Day["resources"][number]
 type Appointment = Day["appointments"][number]
+type Closure = Resource["closures"][number]
 
 const PX_PER_MINUTE = 2
 const SNAP_MINUTES = 5
@@ -43,9 +61,13 @@ const totalMinutes = (intervals: Interval[]) =>
 const clock = (minutes: number) =>
   `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`
 
-/** The hours shown: every resource's working time, widened to whole hours. */
+/**
+ * The hours shown: every resource's weekly hours, widened to whole hours.
+ * Weekly hours rather than working time, so a closed calendar still shows
+ * its closure.
+ */
 function visibleRange(day: Day) {
-  const shifts = day.resources.flatMap((resource) => resource.working)
+  const shifts = day.resources.flatMap((resource) => resource.hours)
   if (shifts.length === 0) return null
   const start = Math.min(...shifts.map((shift) => minutesOf(shift.start)))
   const end = Math.max(
@@ -59,6 +81,7 @@ export function DayBoard() {
   const day = useQuery(api.schedule.day, { siteId: site._id, date })
   const scrollRef = useRef<HTMLDivElement>(null)
   const scrolledFor = useRef<string | null>(null)
+  const [closing, setClosing] = useState<Resource | null>(null)
   const range = day ? visibleRange(day) : null
   const isToday = date === today
 
@@ -121,7 +144,7 @@ export function DayBoard() {
     gridTemplateColumns: [
       "4rem",
       ...day.resources.map((resource) =>
-        resource.working.length > 0 ? "minmax(13rem, 1fr)" : "8rem"
+        resource.hours.length > 0 ? "minmax(13rem, 1fr)" : "8rem"
       ),
     ].join(" "),
   }
@@ -144,6 +167,7 @@ export function DayBoard() {
               appointments={day.appointments.filter(
                 (a) => a.resourceId === resource._id
               )}
+              onAddClosure={() => setClosing(resource)}
             />
           ))}
         </div>
@@ -181,6 +205,11 @@ export function DayBoard() {
           {showNow && <NowLine minutes={nowMinutes} rangeStart={range.start} />}
         </div>
       </div>
+      <ClosureDialog
+        calendar={closing}
+        calendars={day.resources}
+        onClose={() => setClosing(null)}
+      />
     </div>
   )
 }
@@ -188,9 +217,11 @@ export function DayBoard() {
 function ColumnHeader({
   resource,
   appointments,
+  onAddClosure,
 }: {
   resource: Resource
   appointments: Appointment[]
+  onAddClosure: () => void
 }) {
   const busy = appointments
     .filter((a) => occupiesSlot(a.status))
@@ -202,9 +233,34 @@ function ColumnHeader({
 
   return (
     <div className="flex min-w-0 flex-col gap-1 border-r px-3 py-2 last:border-r-0">
-      <span className="truncate text-sm font-semibold">{resource.name}</span>
+      <div className="flex items-center gap-1">
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+          {resource.name}
+        </span>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="-my-1 -mr-1.5 text-muted-foreground"
+          aria-label={`Zárás rögzítése: ${resource.name}`}
+          title="Zárás rögzítése"
+          onClick={onAddClosure}
+        >
+          <CalendarOffIcon />
+        </Button>
+      </div>
       {load === null ? (
-        <span className="text-xs text-muted-foreground">Ma nem rendel</span>
+        <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+          {resource.hours.length > 0 ? (
+            <>
+              <LockIcon className="size-3 shrink-0" aria-hidden />
+              <span className="truncate">
+                Zárva: {resource.closures[0]?.reason}
+              </span>
+            </>
+          ) : (
+            "Ma nem rendel"
+          )}
+        </span>
       ) : (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="tabular">{busy.length} foglalás</span>
@@ -288,6 +344,31 @@ function Column({
         }}
         onClick={onClick}
       />
+      {resource.closures.flatMap((closure) =>
+        // Drawn only over weekly hours; outside them the column is closed anyway.
+        mergeIntervals(resource.hours).flatMap((shift) => {
+          const start = Math.max(shift.start, closure.startAt)
+          const end = Math.min(shift.end, closure.endAt)
+          if (end <= start) return []
+          return (
+            <ClosureBlock
+              key={`${closure._id}-${shift.start}`}
+              closure={closure}
+              resourceName={resource.name}
+              affected={
+                appointments.filter(
+                  (a) =>
+                    occupiesSlot(a.status) &&
+                    a.startAt < closure.endAt &&
+                    closure.startAt < a.endAt
+                ).length
+              }
+              top={y(start)}
+              height={((end - start) / MINUTE_MS) * PX_PER_MINUTE}
+            />
+          )
+        })
+      )}
       {appointments.map((appointment) => (
         <AppointmentBlock
           key={appointment._id}
@@ -366,6 +447,108 @@ function DraftBlock({
   )
 }
 
+/**
+ * Closed time on a calendar. The hatching beneath already reads as "not
+ * bookable"; the label says why, and its popover lets staff reopen it. The
+ * count covers the day shown, since the board only has that day's bookings.
+ */
+function ClosureBlock({
+  closure,
+  resourceName,
+  affected,
+  top,
+  height,
+}: {
+  closure: Closure
+  resourceName: string
+  affected: number
+  top: number
+  height: number
+}) {
+  const { today } = useDesk()
+  const removeClosure = useMutation(api.schedule.removeClosure)
+  const [removing, setRemoving] = useState(false)
+  const span = formatClosureSpan(closure, parseLocalDate(today).year)
+
+  async function remove() {
+    setRemoving(true)
+    try {
+      await removeClosure({ closureId: closure._id })
+      toast.success("Zárás feloldva", {
+        description: `${resourceName}: ez az idő újra foglalható.`,
+      })
+    } catch (error) {
+      toast.error(errorMessage(error))
+      setRemoving(false)
+    }
+  }
+
+  return (
+    <>
+      <div
+        className="pointer-events-none absolute inset-x-0 z-[5] border-y border-dashed border-muted-foreground/40"
+        style={{ top, height }}
+        aria-hidden
+      />
+      <Popover>
+        {/* The label sits above bookings (11 > 10), top right, so a closure
+            that starts inside a booking still shows why and can be opened. */}
+        <PopoverTrigger
+          className="absolute right-1 z-[11] flex max-w-[calc(100%-0.5rem)] items-center gap-1 rounded-sm border bg-card px-1.5 py-0.5 text-left text-xs text-muted-foreground shadow-xs outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+          style={{ top: top + 2 }}
+          aria-label={`Zárva: ${closure.reason}, ${span}`}
+        >
+          <LockIcon className="size-3 shrink-0" aria-hidden />
+          <span className="truncate">
+            <span className="font-medium text-foreground">
+              {closure.reason}
+            </span>
+            {affected > 0 && `, ${affected} foglalás áthelyezendő`}
+          </span>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-72">
+          <PopoverHeader>
+            <PopoverTitle>Zárva: {closure.reason}</PopoverTitle>
+            <PopoverDescription>
+              {resourceName}, <span className="tabular">{span}</span>
+            </PopoverDescription>
+          </PopoverHeader>
+          {affected > 0 && (
+            <p className="text-sm">
+              Ezen a napon {affected} foglalás esik a zárásra. Helyezze át vagy
+              mondja le őket.
+            </p>
+          )}
+          <Button
+            variant="outline"
+            disabled={removing}
+            onClick={() => void remove()}
+          >
+            {removing && <Spinner />}
+            Zárás feloldása
+          </Button>
+        </PopoverContent>
+      </Popover>
+    </>
+  )
+}
+
+/** "november 10., kedd, 12:00–15:00", or a day range for whole days. */
+function formatClosureSpan(closure: Closure, currentYear: number) {
+  const start = instantToZoned(closure.startAt)
+  const end = instantToZoned(closure.endAt)
+  const lastDay = instantToZoned(closure.endAt - 1).date
+  if (start.minutes === 0 && end.minutes === 0) {
+    return start.date === lastDay
+      ? formatDay(start.date, currentYear)
+      : `${formatDay(start.date, currentYear)} – ${formatDay(lastDay, currentYear)}`
+  }
+  if (start.date === end.date) {
+    return `${formatDay(start.date, currentYear)}, ${formatTimeRange(closure.startAt, closure.endAt)}`
+  }
+  return `${formatDay(start.date, currentYear)} ${formatTime(closure.startAt)} – ${formatDay(end.date, currentYear)} ${formatTime(closure.endAt)}`
+}
+
 const blockStyle: Record<
   Exclude<Appointment["status"], "cancelled">,
   string
@@ -422,8 +605,9 @@ function AppointmentBlock({
         // A no-show releases its slot; a rebooking on top of it must stay readable.
         occupiesSlot(status) ? "z-10" : "z-[2]",
         // The block whose details are open stays marked while staff work in the sheet.
-        // Layering: now-line 1 < no-show 2 < booked 10 < booking draft 12 <
-        // selected 15 < focused 16 < sticky gutter 20, now label 25, header 30.
+        // Layering: now-line 1 < no-show 2 < closure 5 < booked 10 < closure
+        // label 11 < booking draft 12 < selected 15 < focused 16 < sticky
+        // gutter 20, now label 25, header 30.
         selected && "z-[15] shadow-md ring-2 ring-primary",
         // While it is moved, the old place reads as "going away".
         beingMoved && "opacity-45"

@@ -14,18 +14,27 @@ import { internal } from "./_generated/api"
 import type { Id } from "./_generated/dataModel"
 import { internalMutation } from "./_generated/server"
 import type { MutationCtx } from "./_generated/server"
-import { workingIntervals } from "./lib/availability"
-import type { WorkingRule } from "./lib/availability"
+import { subtractIntervals, workingIntervals } from "./lib/availability"
+import type { Interval, WorkingRule } from "./lib/availability"
 import { DEMO_TOKEN_IDENTIFIER, isSyntheticDemo } from "./lib/auth"
 import { fail } from "./lib/errors"
 import { patientSearchText } from "./lib/search"
 import { tajCheckDigit } from "./lib/taj"
-import { MINUTE_MS, addDays, isLocalDate, todayInClinic } from "./lib/time"
+import {
+  MINUTE_MS,
+  addDays,
+  dayBounds,
+  isLocalDate,
+  todayInClinic,
+  zonedTimeToInstant,
+} from "./lib/time"
+import type { WallTime } from "./lib/time"
 import type { AppointmentSource, ResourceKind } from "./validators"
 
 const tables = [
   "auditEvents",
   "appointments",
+  "closures",
   "patients",
   "workingHours",
   "resourceServices",
@@ -84,6 +93,30 @@ export const populate = internalMutation({
     const resources = await insertSites(ctx, serviceIds)
     const patientIds = await insertPatients(ctx, random, 180)
 
+    // Closures go in first so the day filler leaves their time empty.
+    const closed = new Map<Id<"resources">, Interval[]>()
+    for (const resource of resources) {
+      const intervals = []
+      for (const closure of resource.closures) {
+        const date = addDays(anchorDate, closure.day)
+        const { start, end } = closure.hours
+          ? {
+              start: zonedTimeToInstant(date, closure.hours[0]),
+              end: zonedTimeToInstant(date, closure.hours[1]),
+            }
+          : dayBounds(date)
+        await ctx.db.insert("closures", {
+          resourceId: resource._id,
+          startAt: start,
+          endAt: end,
+          reason: closure.reason,
+          createdBy: staffId,
+        })
+        intervals.push({ start, end })
+      }
+      closed.set(resource._id, intervals)
+    }
+
     let count = 0
     for (let offset = -3; offset <= 7; offset++) {
       const date = addDays(anchorDate, offset)
@@ -91,6 +124,7 @@ export const populate = internalMutation({
         count += await fillDay(ctx, {
           resource,
           date,
+          closed: closed.get(resource._id) ?? [],
           now,
           random,
           patientIds,
@@ -208,6 +242,8 @@ type ResourceSeed = {
   speed?: number
   /** Share of working time the demo fills. */
   load: number
+  /** Closures, by day after the anchor; without `hours` the whole day. */
+  closures?: { day: number; hours?: [WallTime, WallTime]; reason: string }[]
 }
 
 const servicesOf = (kind: ResourceKind) =>
@@ -239,6 +275,9 @@ const sites: { name: string; resources: ResourceSeed[] }[] = [
         hours: weekdays("08:00", "18:00"),
         services: servicesOf("xray"),
         load: 0.12,
+        closures: [
+          { day: 1, hours: ["12:00", "15:00"], reason: "Karbantartás" },
+        ],
       },
       {
         name: "Gyógytorna",
@@ -255,6 +294,7 @@ const sites: { name: string; resources: ResourceSeed[] }[] = [
         hours: weekdays("09:00", "17:00"),
         services: ["Magnetoterápia"],
         load: 0.4,
+        closures: [{ day: 2, reason: "Szabadság" }],
       },
       {
         name: "Ortopédia",
@@ -323,6 +363,7 @@ type SeededResource = {
   _id: Id<"resources">
   siteId: Id<"sites">
   hours: WorkingRule[]
+  closures: NonNullable<ResourceSeed["closures"]>
   load: number
   services: { _id: Id<"services">; durationMinutes: number; priceHuf: number }[]
 }
@@ -375,6 +416,7 @@ async function insertSites(
         _id: resourceId,
         siteId,
         hours: resource.hours,
+        closures: resource.closures ?? [],
         load: resource.load,
         services: linked,
       })
@@ -388,6 +430,7 @@ async function fillDay(
   options: {
     resource: SeededResource
     date: string
+    closed: Interval[]
     now: number
     random: () => number
     patientIds: Id<"patients">[]
@@ -396,7 +439,10 @@ async function fillDay(
 ) {
   const { resource, now, random, patientIds, staffId } = options
   let count = 0
-  for (const shift of workingIntervals(resource.hours, options.date)) {
+  for (const shift of subtractIntervals(
+    workingIntervals(resource.hours, options.date),
+    options.closed
+  )) {
     let cursor = shift.start
     while (cursor < shift.end) {
       const service = pick(random, resource.services)

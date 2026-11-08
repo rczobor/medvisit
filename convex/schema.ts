@@ -57,6 +57,19 @@ export default defineSchema({
     end: v.string(),
   }).index("by_resourceId_and_weekday", ["resourceId", "weekday"]),
 
+  /**
+   * Time a calendar is closed on top of its weekly hours: a holiday, a
+   * service visit, leave. Bookings already in the window stay and must be
+   * moved by hand.
+   */
+  closures: defineTable({
+    resourceId: v.id("resources"),
+    startAt: v.number(),
+    endAt: v.number(),
+    reason: v.string(),
+    createdBy: v.id("staff"),
+  }).index("by_resourceId_and_startAt", ["resourceId", "startAt"]),
+
   patients: defineTable({
     ...patientFields,
     /** Lower-cased name, TAJ, phone and birth date, for the search index. */
