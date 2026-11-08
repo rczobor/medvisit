@@ -206,3 +206,136 @@ describe("setStatus", () => {
     ).rejects.toMatchObject({ data: { code: "INVALID_TRANSITION" } })
   })
 })
+
+describe("reschedule", () => {
+  test("moves a booking into time that overlaps its old slot, and frees the old one", async () => {
+    const { t, staff, resourceId, serviceId, patientId } = await setup()
+    const appointmentId = await staff.mutation(api.schedule.book, {
+      resourceId,
+      serviceId,
+      patientId,
+      startAt: at("09:00"),
+    })
+
+    // The appointment's own slot counts as free while it is being moved.
+    const { starts } = await staff.query(api.schedule.slots, {
+      resourceId,
+      serviceId,
+      date: day,
+      ignore: appointmentId,
+    })
+    expect(starts).toContain(at("09:15"))
+
+    await staff.mutation(api.schedule.reschedule, {
+      appointmentId,
+      resourceId,
+      startAt: at("09:15"),
+    })
+    const moved = await t.run((ctx) =>
+      ctx.db.get("appointments", appointmentId)
+    )
+    expect(moved).toMatchObject({ startAt: at("09:15"), endAt: at("09:45") })
+    await staff.mutation(api.schedule.book, {
+      resourceId,
+      serviceId,
+      patientId,
+      startAt: at("08:45"),
+    })
+    const history = await t.run((ctx) =>
+      ctx.db
+        .query("auditEvents")
+        .withIndex("by_appointmentId", (q) =>
+          q.eq("appointmentId", appointmentId)
+        )
+        .collect()
+    )
+    expect(history.map((event) => event.action)).toEqual([
+      "appointment.booked",
+      "appointment.moved",
+    ])
+  })
+
+  test("moves to another calendar with that calendar's length for the exam", async () => {
+    const { t, staff, siteId, resourceId, serviceId, patientId } = await setup()
+    const fastId = await t.run(async (ctx) => {
+      const id = await ctx.db.insert("resources", {
+        siteId,
+        name: "MR 3 T",
+        kind: "mr",
+        slotStepMinutes: 5,
+        sortOrder: 1,
+      })
+      await ctx.db.insert("workingHours", {
+        resourceId: id,
+        weekday: 1,
+        start: "08:00",
+        end: "12:00",
+      })
+      await ctx.db.insert("resourceServices", {
+        resourceId: id,
+        serviceId,
+        durationMinutes: 20,
+      })
+      return id
+    })
+    const appointmentId = await staff.mutation(api.schedule.book, {
+      resourceId,
+      serviceId,
+      patientId,
+      startAt: at("09:00"),
+    })
+    await staff.mutation(api.schedule.reschedule, {
+      appointmentId,
+      resourceId: fastId,
+      startAt: at("10:00"),
+    })
+    const moved = await t.run((ctx) =>
+      ctx.db.get("appointments", appointmentId)
+    )
+    expect(moved).toMatchObject({
+      resourceId: fastId,
+      startAt: at("10:00"),
+      endAt: at("10:20"),
+    })
+  })
+
+  test("refuses taken time, the past, and visits that have started", async () => {
+    const { staff, resourceId, serviceId, patientId } = await setup()
+    const booking = { resourceId, serviceId, patientId }
+    const appointmentId = await staff.mutation(api.schedule.book, {
+      ...booking,
+      startAt: at("09:00"),
+    })
+    await staff.mutation(api.schedule.book, {
+      ...booking,
+      startAt: at("10:00"),
+    })
+
+    await expect(
+      staff.mutation(api.schedule.reschedule, {
+        appointmentId,
+        resourceId,
+        startAt: at("10:15"),
+      })
+    ).rejects.toMatchObject({ data: { code: "SLOT_TAKEN" } })
+    await expect(
+      staff.mutation(api.schedule.reschedule, {
+        appointmentId,
+        resourceId,
+        startAt: at("08:00"),
+      })
+    ).rejects.toMatchObject({ data: { code: "IN_PAST" } })
+
+    await staff.mutation(api.schedule.setStatus, {
+      appointmentId,
+      status: "arrived",
+    })
+    await expect(
+      staff.mutation(api.schedule.reschedule, {
+        appointmentId,
+        resourceId,
+        startAt: at("11:00"),
+      })
+    ).rejects.toMatchObject({ data: { code: "NOT_MOVABLE" } })
+  })
+})

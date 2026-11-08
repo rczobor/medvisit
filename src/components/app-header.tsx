@@ -59,6 +59,7 @@ export function AppHeader({
               ...previous,
               site: value,
               book: undefined,
+              move: undefined,
             }),
           })
         }}
@@ -90,6 +91,7 @@ export function AppHeader({
               ...previous,
               site: candidate._id,
               book: undefined,
+              move: undefined,
             })}
             aria-current={candidate._id === site._id ? "page" : undefined}
             className={cn(

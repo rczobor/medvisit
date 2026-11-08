@@ -52,6 +52,8 @@ const errorMessages: Record<ErrorCode, string> = {
   OUTSIDE_HOURS: "Az időpont kívül esik a rendelési időn.",
   SLOT_TAKEN: "Ezt az időpontot közben lefoglalták. Válasszon másikat.",
   INVALID_TRANSITION: "Ez az állapotváltás most nem lehetséges.",
+  NOT_MOVABLE:
+    "Csak érkezés előtti foglalás helyezhető át. Frissítse az adatlapot.",
   INVALID_TAJ: "A TAJ-szám nem érvényes. Ellenőrizze a számjegyeket.",
   DUPLICATE_TAJ:
     "Ezzel a TAJ-számmal már van páciens. Keressen rá név vagy TAJ alapján.",

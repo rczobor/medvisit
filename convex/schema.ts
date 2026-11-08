@@ -45,7 +45,9 @@ export default defineSchema({
     resourceId: v.id("resources"),
     serviceId: v.id("services"),
     durationMinutes: v.optional(v.number()),
-  }).index("by_resourceId_and_serviceId", ["resourceId", "serviceId"]),
+  })
+    .index("by_resourceId_and_serviceId", ["resourceId", "serviceId"])
+    .index("by_serviceId", ["serviceId"]),
 
   /** Weekly opening hours in clinic wall time; several rows make a split day. */
   workingHours: defineTable({

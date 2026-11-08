@@ -55,32 +55,49 @@ import {
 } from "@/lib/format"
 import { errorCode, errorMessage } from "@/lib/labels"
 
-export type BookingRequest = { resource: Id<"resources"> | "any"; at?: string }
+export type BookingRequest =
+  | { kind: "new"; resource: Id<"resources"> | "any"; at?: string }
+  | { kind: "move"; appointmentId: Id<"appointments"> }
 
 export function BookingSheet({
   request,
   onClose,
   onBooked,
+  onMoved,
 }: {
   request: BookingRequest | null
   onClose: () => void
   onBooked: (date: LocalDate) => void
+  onMoved: (appointmentId: Id<"appointments">, date: LocalDate) => void
 }) {
   // Keep the last request while the sheet animates closed.
   const shown = useRef(request)
   if (request) shown.current = request
+  const moving = shown.current?.kind === "move"
 
   return (
     <Sheet open={request !== null} onOpenChange={(open) => !open && onClose()}>
       <SheetContent className="gap-0 data-[side=right]:sm:max-w-lg">
         <SheetHeader className="border-b">
-          <SheetTitle className="text-lg font-semibold">Új foglalás</SheetTitle>
+          <SheetTitle className="text-lg font-semibold">
+            {moving ? "Foglalás áthelyezése" : "Új foglalás"}
+          </SheetTitle>
           <SheetDescription>
-            A rögzített foglalás azonnal megjelenik a napi táblán.
+            {moving
+              ? "A régi időpont a mentéskor felszabadul."
+              : "A rögzített foglalás azonnal megjelenik a napi táblán."}
           </SheetDescription>
         </SheetHeader>
-        {shown.current && (
-          <BookingForm request={shown.current} onBooked={onBooked} />
+        {shown.current?.kind === "move" ? (
+          <MoveForm
+            key={shown.current.appointmentId}
+            appointmentId={shown.current.appointmentId}
+            onMoved={onMoved}
+          />
+        ) : (
+          shown.current && (
+            <BookingForm request={shown.current} onBooked={onBooked} />
+          )
         )}
       </SheetContent>
     </Sheet>
@@ -95,21 +112,101 @@ type Service = {
   durationMinutes: number
 }
 
+/** The booking being moved, as the booking form needs it. */
+type Moving = {
+  _id: Id<"appointments">
+  siteId: Id<"sites">
+  resourceId: Id<"resources">
+  resourceName: string
+  startAt: number
+  endAt: number
+  serviceId: Id<"services">
+  patient: PatientSummary
+}
+
+function MoveForm({
+  appointmentId,
+  onMoved,
+}: {
+  appointmentId: Id<"appointments">
+  onMoved: (appointmentId: Id<"appointments">, date: LocalDate) => void
+}) {
+  const appointment = useQuery(api.schedule.appointment, { appointmentId })
+  // Read once: the form keeps the booking as it was when the move started,
+  // so a live update can't swap the slot list under the user mid-choice.
+  const [moving, setMoving] = useState<Moving | null>(null)
+  if (moving === null && appointment?.patient && appointment.resource) {
+    const { patient, resource } = appointment
+    setMoving({
+      _id: appointment._id,
+      siteId: appointment.siteId,
+      resourceId: resource._id,
+      resourceName: resource.name,
+      startAt: appointment.startAt,
+      endAt: appointment.endAt,
+      serviceId: appointment.serviceId,
+      patient: {
+        _id: patient._id,
+        familyName: patient.familyName,
+        givenName: patient.givenName,
+        birthDate: patient.birthDate,
+        taj: patient.taj ?? null,
+        phone: patient.phone ?? null,
+      },
+    })
+  }
+
+  if (appointment === undefined) {
+    return (
+      <div className="grid flex-1 place-items-center">
+        <Spinner className="size-5 text-muted-foreground" />
+      </div>
+    )
+  }
+  if (moving === null || appointment?.status !== "booked") {
+    return (
+      <p className="p-4 text-sm text-muted-foreground">
+        Ez a foglalás nem helyezhető át: már nem létezik, vagy a páciens
+        megérkezett. Zárja be ezt a panelt.
+      </p>
+    )
+  }
+  return (
+    <BookingForm
+      request={{ kind: "move", appointmentId }}
+      moving={moving}
+      onBooked={(date) => onMoved(appointmentId, date)}
+    />
+  )
+}
+
 function BookingForm({
   request,
+  moving,
   onBooked,
 }: {
   request: BookingRequest
+  /** Set when the form moves an existing booking instead of making one. */
+  moving?: Moving
   onBooked: (date: LocalDate) => void
 }) {
   const desk = useDesk()
-  const [date, setDate] = useState(desk.date)
-  const [resourceChoice, setResourceChoice] = useState(
-    request.resource === "any" ? null : request.resource
+  const [date, setDate] = useState(
+    moving ? instantToZoned(moving.startAt).date : desk.date
   )
-  const [service, setService] = useState<Service | null>(null)
+  const [resourceChoice, setResourceChoice] = useState(
+    moving
+      ? moving.resourceId
+      : request.kind === "new" && request.resource !== "any"
+        ? request.resource
+        : null
+  )
+  const [service, setService] = useState<{ _id: Id<"services"> } | null>(
+    moving ? { _id: moving.serviceId } : null
+  )
   const [pickedStart, setPickedStart] = useState<number | null>(null)
-  const [patient, setPatient] = useState<PatientSummary | null>(null)
+  const [chosenPatient, setPatient] = useState<PatientSummary | null>(null)
+  const patient = moving?.patient ?? chosenPatient
   const [creatingPatient, setCreatingPatient] = useState<string | null>(null)
   const [note, setNote] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -117,10 +214,21 @@ function BookingForm({
   const [savingPatient, setSavingPatient] = useState(false)
   const [resultsOpen, setResultsOpen] = useState(false)
   const book = useMutation(api.schedule.book)
+  const reschedule = useMutation(api.schedule.reschedule)
   const patientSection = useRef<HTMLElement>(null)
 
-  const day = useQuery(api.schedule.day, { siteId: desk.site._id, date })
-  const resources = day?.resources ?? []
+  const day = useQuery(api.schedule.day, {
+    siteId: moving?.siteId ?? desk.site._id,
+    date,
+  })
+  // A move can only go to calendars that perform the booked exam.
+  const offering = useQuery(
+    api.catalog.resourcesForService,
+    moving ? { serviceId: moving.serviceId } : "skip"
+  )
+  const resources = (day?.resources ?? []).filter(
+    (candidate) => !moving || offering?.includes(candidate._id)
+  )
   const resource =
     resources.find((candidate) => candidate._id === resourceChoice) ??
     resources.at(0) ??
@@ -134,15 +242,32 @@ function BookingForm({
   const slots = useQuery(
     api.schedule.slots,
     resource && selectedService
-      ? { resourceId: resource._id, serviceId: selectedService._id, date }
+      ? {
+          resourceId: resource._id,
+          serviceId: selectedService._id,
+          date,
+          ignore: moving?._id,
+        }
       : "skip"
   )
-  const starts = (slots?.starts ?? []).filter((start) => start >= desk.now)
+  const starts = (slots?.starts ?? []).filter(
+    (start) =>
+      start >= desk.now &&
+      // Offering the current time as a "new" one would make a no-op move.
+      !(
+        moving &&
+        resource?._id === moving.resourceId &&
+        start === moving.startAt
+      )
+  )
 
   // A start chosen on the board stays selected while it fits; otherwise the
   // first free time from there on is suggested.
   const hint =
-    request.at && date === desk.date && resource?._id === request.resource
+    request.kind === "new" &&
+    request.at &&
+    date === desk.date &&
+    resource?._id === request.resource
       ? zonedTimeToInstant(date, request.at)
       : null
   const start =
@@ -158,11 +283,17 @@ function BookingForm({
   // neighbours while they confirm it with the patient.
   const { setBookingDraft } = desk
   const draftResourceId = resource?._id ?? null
+  const movingId = moving?._id
   useEffect(() => {
     if (draftResourceId === null || start === null || end === null) return
-    setBookingDraft({ resourceId: draftResourceId, startAt: start, endAt: end })
+    setBookingDraft({
+      resourceId: draftResourceId,
+      startAt: start,
+      endAt: end,
+      moving: movingId,
+    })
     return () => setBookingDraft(null)
-  }, [draftResourceId, start, end, setBookingDraft])
+  }, [draftResourceId, start, end, movingId, setBookingDraft])
 
   const ready =
     resource && selectedService && start !== null && end !== null && patient
@@ -173,14 +304,22 @@ function BookingForm({
     setSaving(true)
     setError(null)
     try {
-      await book({
-        resourceId: resource._id,
-        serviceId: selectedService._id,
-        patientId: patient._id,
-        startAt: start,
-        note: note.trim() || undefined,
-      })
-      toast.success("Foglalás rögzítve", {
+      if (moving) {
+        await reschedule({
+          appointmentId: moving._id,
+          resourceId: resource._id,
+          startAt: start,
+        })
+      } else {
+        await book({
+          resourceId: resource._id,
+          serviceId: selectedService._id,
+          patientId: patient._id,
+          startAt: start,
+          note: note.trim() || undefined,
+        })
+      }
+      toast.success(moving ? "Foglalás áthelyezve" : "Foglalás rögzítve", {
         description: `${patient.familyName} ${patient.givenName}, ${formatDay(date, currentYear)} ${formatTime(start)}`,
       })
       onBooked(date)
@@ -196,6 +335,20 @@ function BookingForm({
     <>
       {/* Scroll padding keeps a focused field clear of the footer's edge. */}
       <div className="flex min-h-0 flex-1 scroll-py-6 flex-col gap-5 overflow-y-auto p-4">
+        {moving && (
+          <div className="flex flex-col gap-0.5 rounded-md border border-dashed bg-muted/40 px-3 py-2 text-sm">
+            <span className="text-xs text-muted-foreground">
+              Jelenlegi időpont
+            </span>
+            <span className="font-medium first-letter:uppercase">
+              {formatDay(instantToZoned(moving.startAt).date, currentYear)},{" "}
+              <span className="tabular">
+                {formatTimeRange(moving.startAt, moving.endAt)}
+              </span>
+            </span>
+            <span className="text-muted-foreground">{moving.resourceName}</span>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <Field>
             <FieldLabel htmlFor="booking-resource">Naptár</FieldLabel>
@@ -207,7 +360,8 @@ function BookingForm({
               value={resource?._id ?? null}
               onValueChange={(value) => {
                 setResourceChoice(value)
-                setService(null)
+                // A move keeps its exam; the calendars listed all perform it.
+                if (!moving) setService(null)
               }}
             >
               <SelectTrigger id="booking-resource" className="w-full">
@@ -234,53 +388,74 @@ function BookingForm({
           </Field>
         </div>
 
-        <Field>
-          <FieldLabel htmlFor="booking-service">Vizsgálat</FieldLabel>
-          <Combobox
-            items={services ?? []}
-            value={selectedService}
-            onValueChange={(value) => setService(value)}
-            itemToStringLabel={(item) => item.name}
-            isItemEqualToValue={(item, value) => item._id === value._id}
-            filter={(item, query) =>
-              foldForSearch(item.name).includes(foldForSearch(query))
-            }
-          >
-            <ComboboxInput
-              id="booking-service"
-              placeholder="Kezdje el gépelni, pl. térd"
-              className="w-full"
-            />
-            <ComboboxContent>
-              <ComboboxEmpty>
-                Nincs ilyen vizsgálat ezen a naptáron.
-              </ComboboxEmpty>
-              <ComboboxList>
-                {(item: Service) => (
-                  <ComboboxItem key={item._id} value={item}>
-                    <span className="flex-1 truncate">{item.name}</span>
-                    {item.contrast && (
-                      <DropletIcon
-                        className="text-muted-foreground"
-                        aria-label="Kontrasztanyagos"
-                      />
-                    )}
-                    <span className="text-xs text-muted-foreground tabular">
-                      {item.durationMinutes} perc
-                    </span>
-                  </ComboboxItem>
-                )}
-              </ComboboxList>
-            </ComboboxContent>
-          </Combobox>
-          {selectedService && (
-            <p className="text-xs text-muted-foreground">
-              {selectedService.durationMinutes} perc,{" "}
-              {formatHuf(selectedService.priceHuf)}
-              {selectedService.contrast && ", kontrasztanyaggal"}
+        {moving ? (
+          <div className="flex flex-col gap-1">
+            <span className="text-sm font-medium">Vizsgálat</span>
+            <p className="flex items-center gap-1.5 text-sm">
+              {selectedService?.name ?? "…"}
+              {selectedService?.contrast && (
+                <DropletIcon
+                  className="size-3.5 text-muted-foreground"
+                  aria-label="Kontrasztanyagos"
+                />
+              )}
             </p>
-          )}
-        </Field>
+            {selectedService && (
+              <p className="text-xs text-muted-foreground">
+                {selectedService.durationMinutes} perc ezen a naptáron. Az ár
+                nem változik.
+              </p>
+            )}
+          </div>
+        ) : (
+          <Field>
+            <FieldLabel htmlFor="booking-service">Vizsgálat</FieldLabel>
+            <Combobox
+              items={services ?? []}
+              value={selectedService}
+              onValueChange={(value) => setService(value)}
+              itemToStringLabel={(item) => item.name}
+              isItemEqualToValue={(item, value) => item._id === value._id}
+              filter={(item, query) =>
+                foldForSearch(item.name).includes(foldForSearch(query))
+              }
+            >
+              <ComboboxInput
+                id="booking-service"
+                placeholder="Kezdje el gépelni, pl. térd"
+                className="w-full"
+              />
+              <ComboboxContent>
+                <ComboboxEmpty>
+                  Nincs ilyen vizsgálat ezen a naptáron.
+                </ComboboxEmpty>
+                <ComboboxList>
+                  {(item: Service) => (
+                    <ComboboxItem key={item._id} value={item}>
+                      <span className="flex-1 truncate">{item.name}</span>
+                      {item.contrast && (
+                        <DropletIcon
+                          className="text-muted-foreground"
+                          aria-label="Kontrasztanyagos"
+                        />
+                      )}
+                      <span className="text-xs text-muted-foreground tabular">
+                        {item.durationMinutes} perc
+                      </span>
+                    </ComboboxItem>
+                  )}
+                </ComboboxList>
+              </ComboboxContent>
+            </Combobox>
+            {selectedService && (
+              <p className="text-xs text-muted-foreground">
+                {selectedService.durationMinutes} perc,{" "}
+                {formatHuf(selectedService.priceHuf)}
+                {selectedService.contrast && ", kontrasztanyaggal"}
+              </p>
+            )}
+          </Field>
+        )}
 
         <section
           aria-labelledby="booking-slots"
@@ -318,13 +493,15 @@ function BookingForm({
                   {patient.taj && `, TAJ: ${formatTaj(patient.taj)}`}
                 </p>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setPatient(null)}
-              >
-                Másik páciens
-              </Button>
+              {!moving && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setPatient(null)}
+                >
+                  Másik páciens
+                </Button>
+              )}
             </div>
           ) : creatingPatient !== null ? (
             <PatientForm
@@ -353,7 +530,7 @@ function BookingForm({
         <Field
           className={cn(
             resultsOpen && "invisible",
-            creatingPatient !== null && "hidden"
+            (creatingPatient !== null || moving) && "hidden"
           )}
         >
           <FieldLabel htmlFor="booking-note">Megjegyzés</FieldLabel>
@@ -423,7 +600,7 @@ function BookingForm({
           </p>
           <Button size="lg" disabled={!ready || saving} onClick={submit}>
             {saving && <Spinner />}
-            Foglalás rögzítése
+            {moving ? "Áthelyezés mentése" : "Foglalás rögzítése"}
           </Button>
         </div>
       </SheetFooter>

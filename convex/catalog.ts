@@ -39,3 +39,16 @@ export const servicesForResource = query({
       .sort((a, b) => a.name.localeCompare(b.name, "hu"))
   },
 })
+
+/** The calendars that perform a service, for moving a booking between them. */
+export const resourcesForService = query({
+  args: { serviceId: v.id("services") },
+  handler: async (ctx, { serviceId }) => {
+    await requireStaff(ctx)
+    const links = await ctx.db
+      .query("resourceServices")
+      .withIndex("by_serviceId", (q) => q.eq("serviceId", serviceId))
+      .take(200)
+    return links.map((link) => link.resourceId)
+  },
+})

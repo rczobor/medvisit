@@ -1,6 +1,6 @@
 import { useRef, useState } from "react"
 import { useMutation, useQuery } from "convex/react"
-import { DropletIcon } from "lucide-react"
+import { CalendarClockIcon, DropletIcon } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "../../convex/_generated/api"
 import type { Id } from "../../convex/_generated/dataModel"
@@ -79,7 +79,7 @@ function AppointmentDetails({
 }: {
   appointmentId: Id<"appointments">
 }) {
-  const { today, now } = useDesk()
+  const { today, now, openMove } = useDesk()
   const appointment = useQuery(api.schedule.appointment, { appointmentId })
   const setStatus = useMutation(api.schedule.setStatus)
   const [pending, setPending] = useState<AppointmentStatus | null>(null)
@@ -118,6 +118,7 @@ function AppointmentDetails({
       ) && !(to === "noShow" && appointment.startAt > now)
   )
   const forward = actions.find((to) => to === "arrived" || to === "completed")
+  const movable = status === "booked"
   const noShowLater =
     !isFutureDay &&
     nextStatuses(status).includes("noShow") &&
@@ -234,12 +235,17 @@ function AppointmentDetails({
             <ol className="flex flex-col gap-1.5 text-sm">
               {appointment.history.map((event) => {
                 const to = event.details?.to
+                const from = event.details?.fromStartAt
                 const label =
                   event.action === "appointment.booked"
                     ? "Foglalás rögzítve"
-                    : isAppointmentStatus(to)
-                      ? historyLabel[to]
-                      : event.action
+                    : event.action === "appointment.moved"
+                      ? typeof from === "number"
+                        ? `Áthelyezve, korábban ${formatDate(instantToZoned(from).date)} ${formatTime(from)}`
+                        : "Áthelyezve"
+                      : isAppointmentStatus(to)
+                        ? historyLabel[to]
+                        : event.action
                 return (
                   <li key={event._id} className="flex justify-between gap-3">
                     <span>{label}</span>
@@ -255,7 +261,7 @@ function AppointmentDetails({
         )}
       </div>
 
-      {actions.length > 0 && (
+      {(actions.length > 0 || movable) && (
         <div className="flex flex-wrap gap-2 border-t bg-card p-4">
           {forward && (
             <Button
@@ -266,6 +272,17 @@ function AppointmentDetails({
             >
               {pending === forward && <Spinner />}
               {transitionLabel(status, forward)}
+            </Button>
+          )}
+          {movable && (
+            <Button
+              size="lg"
+              variant="outline"
+              disabled={pending !== null}
+              onClick={() => openMove(appointmentId)}
+            >
+              <CalendarClockIcon />
+              Áthelyezés
             </Button>
           )}
           {actions

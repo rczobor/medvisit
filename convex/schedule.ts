@@ -174,6 +174,8 @@ export const slots = query({
     resourceId: v.id("resources"),
     serviceId: v.id("services"),
     date: localDate,
+    /** An appointment being rescheduled, whose own time counts as free. */
+    ignore: v.optional(v.id("appointments")),
   },
   handler: async (ctx, args) => {
     await requireStaff(ctx)
@@ -188,7 +190,7 @@ export const slots = query({
     const { start, end } = dayBounds(date)
     const starts = availableStarts({
       working: await workingDay(ctx, args.resourceId, date),
-      busy: await busyIntervals(ctx, args.resourceId, start, end),
+      busy: await busyIntervals(ctx, args.resourceId, start, end, args.ignore),
       durationMinutes,
       stepMinutes: resource.slotStepMinutes,
     })
@@ -201,6 +203,38 @@ async function audit(
   event: Omit<Doc<"auditEvents">, "_id" | "_creationTime">
 ) {
   await ctx.db.insert("auditEvents", event)
+}
+
+/**
+ * Checks that `[startAt, startAt + durationMinutes)` can be booked on the
+ * resource and returns its end. The overlap read must stay in the same
+ * mutation as the write that takes the time; see `busyIntervals`.
+ */
+async function claimTime(
+  ctx: MutationCtx,
+  resourceId: Id<"resources">,
+  startAt: number,
+  durationMinutes: number,
+  ignore?: Id<"appointments">
+) {
+  if (
+    !Number.isInteger(startAt / MINUTE_MS) ||
+    durationMinutes > MAX_APPOINTMENT_MINUTES
+  ) {
+    fail("INVALID_INPUT")
+  }
+  if (startAt < Date.now() - PAST_GRACE_MS) fail("IN_PAST")
+
+  const endAt = startAt + durationMinutes * MINUTE_MS
+  const placement = checkPlacement({
+    working: await workingDay(ctx, resourceId, instantToZoned(startAt).date),
+    busy: await busyIntervals(ctx, resourceId, startAt, endAt, ignore),
+    start: startAt,
+    end: endAt,
+  })
+  if (placement === "outsideHours") fail("OUTSIDE_HOURS")
+  if (placement === "conflict") fail("SLOT_TAKEN")
+  return endAt
 }
 
 export const book = mutation({
@@ -221,28 +255,8 @@ export const book = mutation({
       args.resourceId,
       args.serviceId
     )
-    if (
-      !Number.isInteger(args.startAt / MINUTE_MS) ||
-      durationMinutes > MAX_APPOINTMENT_MINUTES
-    ) {
-      fail("INVALID_INPUT")
-    }
-    if (args.startAt < Date.now() - PAST_GRACE_MS) fail("IN_PAST")
-
     const startAt = args.startAt
-    const endAt = startAt + durationMinutes * MINUTE_MS
-    const placement = checkPlacement({
-      working: await workingDay(
-        ctx,
-        resource._id,
-        instantToZoned(startAt).date
-      ),
-      busy: await busyIntervals(ctx, resource._id, startAt, endAt),
-      start: startAt,
-      end: endAt,
-    })
-    if (placement === "outsideHours") fail("OUTSIDE_HOURS")
-    if (placement === "conflict") fail("SLOT_TAKEN")
+    const endAt = await claimTime(ctx, resource._id, startAt, durationMinutes)
 
     const note = args.note?.trim()
     const appointmentId = await ctx.db.insert("appointments", {
@@ -266,6 +280,67 @@ export const book = mutation({
       details: { startAt, resourceId: resource._id, serviceId: service._id },
     })
     return appointmentId
+  },
+})
+
+/**
+ * Moves a booked appointment to a new start, on the same or another calendar.
+ * The exam, patient and price stay; the length follows the new calendar.
+ */
+export const reschedule = mutation({
+  args: {
+    appointmentId: v.id("appointments"),
+    resourceId: v.id("resources"),
+    startAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const staff = await requireStaff(ctx)
+    const appointment = await ctx.db.get("appointments", args.appointmentId)
+    const resource = await ctx.db.get("resources", args.resourceId)
+    if (!appointment || !resource) fail("NOT_FOUND")
+    // Once the patient has arrived or the visit is closed, the record
+    // describes what happened and must not move.
+    if (appointment.status !== "booked") fail("NOT_MOVABLE")
+    const { durationMinutes } = await bookableService(
+      ctx,
+      resource._id,
+      appointment.serviceId
+    )
+    const startAt = args.startAt
+    const endAt = await claimTime(
+      ctx,
+      resource._id,
+      startAt,
+      durationMinutes,
+      appointment._id
+    )
+    if (
+      resource._id === appointment.resourceId &&
+      startAt === appointment.startAt &&
+      endAt === appointment.endAt
+    ) {
+      return null
+    }
+
+    await ctx.db.patch("appointments", appointment._id, {
+      siteId: resource.siteId,
+      resourceId: resource._id,
+      startAt,
+      endAt,
+    })
+    await audit(ctx, {
+      actorId: staff._id,
+      action: "appointment.moved",
+      appointmentId: appointment._id,
+      patientId: appointment.patientId,
+      details: {
+        fromStartAt: appointment.startAt,
+        fromResourceId: appointment.resourceId,
+        startAt,
+        resourceId: resource._id,
+      },
+    })
+    return null
   },
 })
 

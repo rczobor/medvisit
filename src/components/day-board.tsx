@@ -303,6 +303,7 @@ function Column({
         <DraftBlock
           startAt={draft.startAt}
           endAt={draft.endAt}
+          moving={draft.moving !== undefined}
           top={y(draft.startAt)}
           height={((draft.endAt - draft.startAt) / MINUTE_MS) * PX_PER_MINUTE}
         />
@@ -312,18 +313,21 @@ function Column({
 }
 
 /**
- * The slot being booked, drawn as a dashed placeholder. The booking sheet
- * carries the details, so it is hidden from assistive tech. It scrolls into
- * view when the chosen time changes.
+ * The slot being booked, or the new time of a booking being moved, drawn as a
+ * dashed placeholder. Its fill is opaque so a move's draft covers the faded
+ * old block it may overlap. The booking sheet carries the details, so it is
+ * hidden from assistive tech. It scrolls into view when the time changes.
  */
 function DraftBlock({
   startAt,
   endAt,
+  moving,
   top,
   height,
 }: {
   startAt: number
   endAt: number
+  moving: boolean
   top: number
   height: number
 }) {
@@ -341,14 +345,16 @@ function DraftBlock({
         // margins keep its neighbours in view and clear the sticky header and
         // time gutter. From `sm` the booking sheet covers the right 32rem of
         // the board, so the right margin reveals the draft left of the sheet.
-        className="pointer-events-none absolute inset-x-1 z-[12] flex scroll-mt-32 scroll-mb-24 scroll-ml-18 items-center gap-1.5 overflow-hidden rounded-sm border border-dashed border-primary bg-primary/10 px-2 text-xs leading-tight text-primary sm:scroll-mr-[32rem]"
+        className="pointer-events-none absolute inset-x-1 z-[12] flex scroll-mt-32 scroll-mb-24 scroll-ml-18 items-center gap-1.5 overflow-hidden rounded-sm border border-dashed border-primary bg-[color-mix(in_oklab,var(--primary)_10%,var(--card))] px-2 text-xs leading-tight text-primary sm:scroll-mr-[32rem]"
         style={{ top: top + 1, height: Math.max(height - 2, 14) }}
       >
         <PlusIcon className="size-3.5 shrink-0" />
         <span className="shrink-0 font-semibold tabular">
           {formatTimeRange(startAt, endAt)}
         </span>
-        <span className="truncate">Új foglalás</span>
+        <span className="truncate">
+          {moving ? "Új időpont" : "Új foglalás"}
+        </span>
       </div>
       {/* Lets the board scroll far enough to clear the sheet for the last
           calendars. */}
@@ -381,10 +387,18 @@ function AppointmentBlock({
   top: number
   height: number
 }) {
-  const { openAppointment, selectedAppointment, now, date, today } = useDesk()
+  const {
+    openAppointment,
+    selectedAppointment,
+    bookingDraft,
+    now,
+    date,
+    today,
+  } = useDesk()
   const { status } = appointment
   if (status === "cancelled") return null
   const selected = appointment._id === selectedAppointment
+  const beingMoved = bookingDraft?.moving === appointment._id
   // The now-line runs under blocks (rule 6), so a block that spans now gets a
   // laser notch on its status bar instead, clear of the text.
   const spansNow =
@@ -410,7 +424,9 @@ function AppointmentBlock({
         // The block whose details are open stays marked while staff work in the sheet.
         // Layering: now-line 1 < no-show 2 < booked 10 < booking draft 12 <
         // selected 15 < focused 16 < sticky gutter 20, now label 25, header 30.
-        selected && "z-[15] shadow-md ring-2 ring-primary"
+        selected && "z-[15] shadow-md ring-2 ring-primary",
+        // While it is moved, the old place reads as "going away".
+        beingMoved && "opacity-45"
       )}
       style={{ top: top + 1, height: Math.max(height - 2, 14) }}
     >

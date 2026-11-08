@@ -7,6 +7,8 @@ export type BookingDraft = {
   resourceId: Id<"resources">
   startAt: number
   endAt: number
+  /** The appointment being moved, which the board shows faded. */
+  moving?: Id<"appointments">
 }
 
 export type Desk = {
@@ -18,6 +20,8 @@ export type Desk = {
   selectedAppointment: Id<"appointments"> | null
   openAppointment: (appointmentId: Id<"appointments">) => void
   openBooking: (resourceId?: Id<"resources">, at?: string) => void
+  /** Opens the booking sheet to move a booked appointment. */
+  openMove: (appointmentId: Id<"appointments">) => void
   bookingDraft: BookingDraft | null
   setBookingDraft: (draft: BookingDraft | null) => void
 }

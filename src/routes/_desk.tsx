@@ -67,9 +67,26 @@ function DeskLayout() {
     now,
     selectedAppointment: search.appointment ?? null,
     openAppointment: (appointmentId) =>
-      update({ appointment: appointmentId, book: undefined, at: undefined }),
+      update({
+        appointment: appointmentId,
+        book: undefined,
+        at: undefined,
+        move: undefined,
+      }),
     openBooking: (resourceId, at) =>
-      update({ book: resourceId ?? "any", at, appointment: undefined }),
+      update({
+        book: resourceId ?? "any",
+        at,
+        appointment: undefined,
+        move: undefined,
+      }),
+    openMove: (appointmentId) =>
+      update({
+        move: appointmentId,
+        appointment: undefined,
+        book: undefined,
+        at: undefined,
+      }),
     bookingDraft,
     setBookingDraft,
   }
@@ -84,15 +101,32 @@ function DeskLayout() {
       </div>
       <BookingSheet
         request={
-          search.book === undefined
-            ? null
-            : { resource: search.book, at: search.at }
+          search.move !== undefined
+            ? { kind: "move", appointmentId: search.move }
+            : search.book !== undefined
+              ? { kind: "new", resource: search.book, at: search.at }
+              : null
         }
-        onClose={() => update({ book: undefined, at: undefined })}
+        // Closing a move returns to the appointment it started from.
+        onClose={() =>
+          update({
+            book: undefined,
+            at: undefined,
+            move: undefined,
+            appointment: search.move,
+          })
+        }
         onBooked={(date) =>
           update({
             book: undefined,
             at: undefined,
+            date: date === today ? undefined : date,
+          })
+        }
+        onMoved={(appointmentId, date) =>
+          update({
+            move: undefined,
+            appointment: appointmentId,
             date: date === today ? undefined : date,
           })
         }

@@ -26,9 +26,9 @@ synthetic deployments answer.
 
 ### 3. Booking can't double-book
 
-`schedule.book` and `schedule.setStatus` read every appointment that could
-overlap the requested time through the `by_resourceId_and_startAt` index
-range. Convex's optimistic concurrency then makes concurrent bookings into the
+`schedule.book`, `schedule.reschedule` and `schedule.setStatus` read every
+appointment that could overlap the requested time through the
+`by_resourceId_and_startAt` index range. Convex's optimistic concurrency then makes concurrent bookings into the
 same window conflict, and one retries and fails with `SLOT_TAKEN`. Keep that
 read in the same mutation as the insert or patch. `MAX_APPOINTMENT_MINUTES`
 bounds the range, so durations must stay under it.

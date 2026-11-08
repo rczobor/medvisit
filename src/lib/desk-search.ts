@@ -15,6 +15,8 @@ export type DeskSearch = {
   book?: Id<"resources"> | "any"
   /** Preferred start time for the booking sheet, `HH:MM`. */
   at?: string
+  /** Open the booking sheet to move this appointment to a new time. */
+  move?: Id<"appointments">
 }
 
 const text = (value: unknown) =>
@@ -35,5 +37,6 @@ export function validateDeskSearch(
     appointment: text(search.appointment) as Id<"appointments"> | undefined,
     book: text(search.book) as Id<"resources"> | "any" | undefined,
     at: at && /^([01]\d|2[0-3]):[0-5]\d$/.test(at) ? at : undefined,
+    move: text(search.move) as Id<"appointments"> | undefined,
   }
 }
