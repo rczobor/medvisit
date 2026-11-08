@@ -1,7 +1,9 @@
 import {
   CLINIC_TIME_ZONE,
   MINUTE_MS,
+  isWallTime,
   isoWeekday,
+  wallTimeToMinutes,
   zonedTimeToInstant,
 } from "./time"
 import type { LocalDate, WallTime } from "./time"
@@ -22,6 +24,32 @@ export const MAX_APPOINTMENT_MINUTES = 8 * 60
  * so it bounds them; a longer break is entered as several closures.
  */
 export const MAX_CLOSURE_DAYS = 31
+
+/** Split shifts allowed in one weekday of a calendar's weekly hours. */
+export const MAX_SHIFTS_PER_DAY = 4
+
+export type DayRulesProblem = "invalidTime" | "endBeforeStart" | "overlap"
+
+/**
+ * What is wrong with one weekday's shifts, or null. Shifts may touch but not
+ * overlap, so each row in the editor stays a distinct shift.
+ */
+export function dayRulesProblem(
+  shifts: readonly { start: WallTime; end: WallTime }[]
+): DayRulesProblem | null {
+  if (shifts.some((s) => !isWallTime(s.start) || !isWallTime(s.end)))
+    return "invalidTime"
+  const sorted = shifts
+    .map((s) => ({
+      start: wallTimeToMinutes(s.start),
+      end: wallTimeToMinutes(s.end),
+    }))
+    .sort((a, b) => a.start - b.start)
+  if (sorted.some((s) => s.end <= s.start)) return "endBeforeStart"
+  if (sorted.some((s, i) => i > 0 && s.start < sorted[i - 1].end))
+    return "overlap"
+  return null
+}
 
 /** Merges overlapping or touching intervals into a sorted, disjoint list. */
 export function mergeIntervals(intervals: readonly Interval[]): Interval[] {

@@ -70,6 +70,19 @@ export default defineSchema({
     createdBy: v.id("staff"),
   }).index("by_resourceId_and_startAt", ["resourceId", "startAt"]),
 
+  /**
+   * Extra time a calendar is open on one day on top of its weekly hours, such
+   * as a Sunday MR session. It never crosses midnight, so a day's openings
+   * all start within that day. Closures still apply over it.
+   */
+  openings: defineTable({
+    resourceId: v.id("resources"),
+    startAt: v.number(),
+    endAt: v.number(),
+    note: v.optional(v.string()),
+    createdBy: v.id("staff"),
+  }).index("by_resourceId_and_startAt", ["resourceId", "startAt"]),
+
   patients: defineTable({
     ...patientFields,
     /** Lower-cased name, TAJ, phone and birth date, for the search index. */

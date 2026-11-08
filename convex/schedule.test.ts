@@ -438,3 +438,137 @@ describe("closures", () => {
     ).rejects.toMatchObject({ data: { code: "INVALID_INPUT" } })
   })
 })
+
+const adminToken = "https://issuer.example|admin-1"
+
+async function withAdmin(t: Awaited<ReturnType<typeof setup>>["t"]) {
+  await t.run((ctx) =>
+    ctx.db.insert("staff", {
+      name: "Teszt Admin",
+      role: "admin",
+      tokenIdentifier: adminToken,
+    })
+  )
+  return t.withIdentity({ tokenIdentifier: adminToken })
+}
+
+describe("weekly hours", () => {
+  test("an admin replaces a calendar's weekly hours; reception can't", async () => {
+    const { t, staff, resourceId, serviceId } = await setup()
+    const admin = await withAdmin(t)
+    const rules = [
+      { weekday: 1, start: "07:00", end: "09:00" },
+      { weekday: 1, start: "13:00", end: "14:00" },
+      { weekday: 7, start: "08:00", end: "12:00" },
+    ]
+    await expect(
+      staff.mutation(api.schedule.setWeeklyHours, { resourceId, rules })
+    ).rejects.toMatchObject({ data: { code: "FORBIDDEN" } })
+    await admin.mutation(api.schedule.setWeeklyHours, { resourceId, rules })
+
+    expect(await staff.query(api.schedule.weeklyHours, { resourceId })).toEqual(
+      rules
+    )
+    const { starts } = await staff.query(api.schedule.slots, {
+      resourceId,
+      serviceId,
+      date: day,
+    })
+    expect(starts).toContain(at("13:00"))
+    expect(starts).not.toContain(at("10:00"))
+  })
+
+  test("rejects overlapping shifts on one day", async () => {
+    const { t, resourceId } = await setup()
+    const admin = await withAdmin(t)
+    await expect(
+      admin.mutation(api.schedule.setWeeklyHours, {
+        resourceId,
+        rules: [
+          { weekday: 2, start: "08:00", end: "12:00" },
+          { weekday: 2, start: "11:00", end: "15:00" },
+        ],
+      })
+    ).rejects.toMatchObject({ data: { code: "INVALID_INPUT" } })
+  })
+})
+
+describe("openings", () => {
+  // The Sunday after `day`; the test calendar has no Sunday hours.
+  const sunday = "2030-01-13"
+  const onSunday = (time: string) => zonedTimeToInstant(sunday, time)
+
+  test("an extra opening makes a closed day bookable, and can't be taken back while booked", async () => {
+    const { t, staff, resourceId, serviceId, patientId } = await setup()
+    const admin = await withAdmin(t)
+    const booking = { resourceId, serviceId, patientId }
+    await expect(
+      staff.mutation(api.schedule.book, {
+        ...booking,
+        startAt: onSunday("09:00"),
+      })
+    ).rejects.toMatchObject({ data: { code: "OUTSIDE_HOURS" } })
+
+    const opening = {
+      resourceId,
+      startAt: onSunday("08:00"),
+      endAt: onSunday("12:00"),
+      note: "MR pótnap",
+    }
+    await expect(
+      staff.mutation(api.schedule.addOpening, opening)
+    ).rejects.toMatchObject({ data: { code: "FORBIDDEN" } })
+    const openingId = await admin.mutation(api.schedule.addOpening, opening)
+
+    const { starts } = await staff.query(api.schedule.slots, {
+      resourceId,
+      serviceId,
+      date: sunday,
+    })
+    expect(starts).toContain(onSunday("08:00"))
+    expect(starts).not.toContain(onSunday("12:00"))
+    const appointmentId = await staff.mutation(api.schedule.book, {
+      ...booking,
+      startAt: onSunday("09:00"),
+    })
+
+    await expect(
+      admin.mutation(api.schedule.removeOpening, { openingId })
+    ).rejects.toMatchObject({ data: { code: "OPENING_HAS_BOOKINGS" } })
+    await staff.mutation(api.schedule.setStatus, {
+      appointmentId,
+      status: "cancelled",
+    })
+    await admin.mutation(api.schedule.removeOpening, { openingId })
+    await expect(
+      staff.mutation(api.schedule.book, {
+        ...booking,
+        startAt: onSunday("10:00"),
+      })
+    ).rejects.toMatchObject({ data: { code: "OUTSIDE_HOURS" } })
+  })
+
+  test("extends weekly hours on the same day, and stays within one day", async () => {
+    const { t, staff, resourceId, serviceId, patientId } = await setup()
+    const admin = await withAdmin(t)
+    await admin.mutation(api.schedule.addOpening, {
+      resourceId,
+      startAt: at("12:00"),
+      endAt: at("14:00"),
+    })
+    // A booking may run from the weekly hours into the opening.
+    await staff.mutation(api.schedule.book, {
+      resourceId,
+      serviceId,
+      patientId,
+      startAt: at("11:45"),
+    })
+    await expect(
+      admin.mutation(api.schedule.addOpening, {
+        resourceId,
+        startAt: at("22:00"),
+        endAt: zonedTimeToInstant("2030-01-08", "02:00"),
+      })
+    ).rejects.toMatchObject({ data: { code: "INVALID_INPUT" } })
+  })
+})

@@ -5,14 +5,17 @@ import type { MutationCtx, QueryCtx } from "./_generated/server"
 import {
   MAX_APPOINTMENT_MINUTES,
   MAX_CLOSURE_DAYS,
+  MAX_SHIFTS_PER_DAY,
   availableStarts,
   checkPlacement,
+  dayRulesProblem,
+  mergeIntervals,
   subtractIntervals,
   workingIntervals,
 } from "./lib/availability"
 import type { Interval } from "./lib/availability"
 import { canTransition, occupiesSlot } from "./lib/appointmentStatus"
-import { requireStaff } from "./lib/auth"
+import { requireAdmin, requireStaff } from "./lib/auth"
 import { fail } from "./lib/errors"
 import {
   MINUTE_MS,
@@ -31,6 +34,8 @@ const MAX_APPOINTMENT_MS = MAX_APPOINTMENT_MINUTES * MINUTE_MS
 const CLOSURE_SCAN_MS = (MAX_CLOSURE_DAYS + 1) * 24 * 60 * MINUTE_MS
 /** Clock skew allowed when booking a slot that is just starting. */
 const PAST_GRACE_MS = 5 * MINUTE_MS
+/** Extra openings one calendar can have on one day; `addOpening` enforces it. */
+const MAX_OPENINGS_PER_DAY = 10
 
 function requireDate(date: string): LocalDate {
   if (!isLocalDate(date)) fail("INVALID_INPUT")
@@ -38,10 +43,11 @@ function requireDate(date: string): LocalDate {
 }
 
 /**
- * A resource's day: its weekly `hours`, the `closures` that overlap the day,
- * and the `working` time left between them. The closure read spans every
- * closure that could reach into the day, so a closure added concurrently
- * conflicts with a booking that relies on the time being open.
+ * A resource's day: its `hours` (weekly hours plus the day's extra
+ * `openings`), the `closures` that overlap the day, and the `working` time
+ * left between them. The closure and opening reads span every row that could
+ * reach into the day, so one added or removed concurrently conflicts with a
+ * booking that relies on the time being open.
  */
 async function workingDay(
   ctx: QueryCtx,
@@ -70,12 +76,32 @@ async function workingDay(
     const { _id, startAt, endAt, reason } = closure
     closures.push({ _id, startAt, endAt, reason })
   }
-  const hours = workingIntervals(rules, date)
+  // Openings never cross midnight, so the day's all start inside it.
+  const openings = (
+    await ctx.db
+      .query("openings")
+      .withIndex("by_resourceId_and_startAt", (q) =>
+        q.eq("resourceId", resourceId).gte("startAt", start).lt("startAt", end)
+      )
+      .take(MAX_OPENINGS_PER_DAY)
+  ).map(({ _id, startAt, endAt, note }) => ({
+    _id,
+    startAt,
+    endAt,
+    note: note ?? null,
+  }))
+  const hours = mergeIntervals([
+    ...workingIntervals(rules, date),
+    ...openings.map((opening) => ({
+      start: opening.startAt,
+      end: opening.endAt,
+    })),
+  ])
   const working = subtractIntervals(
     hours,
     closures.map((closure) => ({ start: closure.startAt, end: closure.endAt }))
   )
-  return { hours, closures, working }
+  return { hours, closures, openings, working }
 }
 
 /**
@@ -475,6 +501,179 @@ export const removeClosure = mutation({
         startAt: closure.startAt,
         endAt: closure.endAt,
         reason: closure.reason,
+      },
+    })
+    return null
+  },
+})
+
+/** A calendar's weekly hours, in clinic wall time. */
+export const weeklyHours = query({
+  args: { resourceId: v.id("resources") },
+  handler: async (ctx, { resourceId }) => {
+    await requireStaff(ctx)
+    const rules = await ctx.db
+      .query("workingHours")
+      .withIndex("by_resourceId_and_weekday", (q) =>
+        q.eq("resourceId", resourceId)
+      )
+      .take(7 * MAX_SHIFTS_PER_DAY)
+    return rules
+      .map(({ weekday, start, end }) => ({ weekday, start, end }))
+      .sort((a, b) => a.weekday - b.weekday || a.start.localeCompare(b.start))
+  },
+})
+
+/**
+ * Replaces a calendar's weekly hours. Bookings already outside the new hours
+ * stay; staff move them by hand.
+ */
+export const setWeeklyHours = mutation({
+  args: {
+    resourceId: v.id("resources"),
+    rules: v.array(
+      v.object({ weekday: v.number(), start: v.string(), end: v.string() })
+    ),
+  },
+  handler: async (ctx, args) => {
+    const staff = await requireAdmin(ctx)
+    const resource = await ctx.db.get("resources", args.resourceId)
+    if (!resource) fail("NOT_FOUND")
+    if (
+      args.rules.some(
+        (rule) =>
+          !Number.isInteger(rule.weekday) ||
+          rule.weekday < 1 ||
+          rule.weekday > 7
+      )
+    ) {
+      fail("INVALID_INPUT")
+    }
+    for (let weekday = 1; weekday <= 7; weekday++) {
+      const shifts = args.rules.filter((rule) => rule.weekday === weekday)
+      if (shifts.length > MAX_SHIFTS_PER_DAY || dayRulesProblem(shifts))
+        fail("INVALID_INPUT")
+    }
+
+    const existing = await ctx.db
+      .query("workingHours")
+      .withIndex("by_resourceId_and_weekday", (q) =>
+        q.eq("resourceId", resource._id)
+      )
+      .take(7 * MAX_SHIFTS_PER_DAY)
+    for (const rule of existing) await ctx.db.delete("workingHours", rule._id)
+    for (const { weekday, start, end } of args.rules) {
+      await ctx.db.insert("workingHours", {
+        resourceId: resource._id,
+        weekday,
+        start,
+        end,
+      })
+    }
+    await audit(ctx, {
+      actorId: staff._id,
+      action: "hours.changed",
+      details: {
+        resourceId: resource._id,
+        hours: args.rules
+          .map((rule) => `${rule.weekday} ${rule.start}-${rule.end}`)
+          .sort()
+          .join(", "),
+      },
+    })
+    return null
+  },
+})
+
+/**
+ * Opens a calendar for extra time on one day, on top of its weekly hours,
+ * such as a Sunday session when demand is high.
+ */
+export const addOpening = mutation({
+  args: {
+    resourceId: v.id("resources"),
+    startAt: v.number(),
+    endAt: v.number(),
+    note: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const staff = await requireAdmin(ctx)
+    const { startAt, endAt } = args
+    const note = args.note?.trim() || undefined
+    const date = instantToZoned(startAt).date
+    if (
+      (note && note.length > 80) ||
+      !Number.isInteger(startAt / MINUTE_MS) ||
+      !Number.isInteger(endAt / MINUTE_MS) ||
+      endAt <= startAt ||
+      instantToZoned(endAt - 1).date !== date
+    ) {
+      fail("INVALID_INPUT")
+    }
+    if (endAt <= Date.now()) fail("IN_PAST")
+    const resource = await ctx.db.get("resources", args.resourceId)
+    if (!resource) fail("NOT_FOUND")
+    const { start, end } = dayBounds(date)
+    const sameDay = await ctx.db
+      .query("openings")
+      .withIndex("by_resourceId_and_startAt", (q) =>
+        q
+          .eq("resourceId", resource._id)
+          .gte("startAt", start)
+          .lt("startAt", end)
+      )
+      .take(MAX_OPENINGS_PER_DAY)
+    if (sameDay.length >= MAX_OPENINGS_PER_DAY) fail("INVALID_INPUT")
+
+    const openingId = await ctx.db.insert("openings", {
+      resourceId: resource._id,
+      startAt,
+      endAt,
+      note,
+      createdBy: staff._id,
+    })
+    await audit(ctx, {
+      actorId: staff._id,
+      action: "opening.added",
+      details: {
+        openingId,
+        resourceId: resource._id,
+        startAt,
+        endAt,
+        note: note ?? null,
+      },
+    })
+    return openingId
+  },
+})
+
+/**
+ * Takes back an extra opening. Refused while bookings sit in its time, so no
+ * patient is left booked onto a closed calendar.
+ */
+export const removeOpening = mutation({
+  args: { openingId: v.id("openings") },
+  handler: async (ctx, { openingId }) => {
+    const staff = await requireAdmin(ctx)
+    const opening = await ctx.db.get("openings", openingId)
+    if (!opening) fail("NOT_FOUND")
+    const busy = await busyIntervals(
+      ctx,
+      opening.resourceId,
+      opening.startAt,
+      opening.endAt
+    )
+    if (busy.length > 0) fail("OPENING_HAS_BOOKINGS")
+    await ctx.db.delete("openings", openingId)
+    await audit(ctx, {
+      actorId: staff._id,
+      action: "opening.removed",
+      details: {
+        openingId,
+        resourceId: opening.resourceId,
+        startAt: opening.startAt,
+        endAt: opening.endAt,
+        note: opening.note ?? null,
       },
     })
     return null

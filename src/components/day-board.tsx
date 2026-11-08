@@ -3,8 +3,11 @@ import { useMutation, useQuery } from "convex/react"
 import type { FunctionReturnType } from "convex/server"
 import { cn } from "cn"
 import {
+  CalendarClockIcon,
   CalendarOffIcon,
+  CalendarPlusIcon,
   DropletIcon,
+  EllipsisVerticalIcon,
   GlobeIcon,
   HandshakeIcon,
   LockIcon,
@@ -27,14 +30,18 @@ import {
 } from "../../convex/lib/time"
 import { ClosureDialog } from "@/components/closure-dialog"
 import { useDesk } from "@/components/desk-context"
+import { HoursDialog } from "@/components/hours-dialog"
+import { OpeningDialog } from "@/components/opening-dialog"
 import { statusIcon } from "@/components/status-badge"
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "@/components/ui/empty"
+import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Popover,
   PopoverContent,
@@ -51,6 +58,7 @@ type Day = FunctionReturnType<typeof api.schedule.day>
 type Resource = Day["resources"][number]
 type Appointment = Day["appointments"][number]
 type Closure = Resource["closures"][number]
+type Opening = Resource["openings"][number]
 
 const PX_PER_MINUTE = 2
 const SNAP_MINUTES = 5
@@ -81,7 +89,10 @@ export function DayBoard() {
   const day = useQuery(api.schedule.day, { siteId: site._id, date })
   const scrollRef = useRef<HTMLDivElement>(null)
   const scrolledFor = useRef<string | null>(null)
+  const isAdmin = useQuery(api.catalog.viewer)?.isAdmin ?? false
   const [closing, setClosing] = useState<Resource | null>(null)
+  const [opening, setOpening] = useState<Resource | null>(null)
+  const [editingHours, setEditingHours] = useState<Resource | null>(null)
   const range = day ? visibleRange(day) : null
   const isToday = date === today
 
@@ -124,17 +135,109 @@ export function DayBoard() {
     )
   }
 
-  if (!range) {
+  const dialogs = (
+    <>
+      <ClosureDialog
+        calendar={closing}
+        calendars={day.resources}
+        onClose={() => setClosing(null)}
+      />
+      <OpeningDialog
+        calendar={opening}
+        calendars={day.resources}
+        onClose={() => setOpening(null)}
+      />
+      <HoursDialog
+        calendar={editingHours}
+        onClose={() => setEditingHours(null)}
+      />
+    </>
+  )
+
+  const headers = (style: React.CSSProperties) => (
+    <div className="sticky top-0 z-30 grid border-b bg-card" style={style}>
+      <div className="sticky left-0 z-10 border-r bg-card" />
+      {day.resources.map((resource) => (
+        <ColumnHeader
+          key={resource._id}
+          resource={resource}
+          appointments={day.appointments.filter(
+            (a) => a.resourceId === resource._id
+          )}
+          isAdmin={isAdmin}
+          onAddClosure={() => setClosing(resource)}
+          onAddOpening={() => setOpening(resource)}
+          onEditHours={() => setEditingHours(resource)}
+        />
+      ))}
+    </div>
+  )
+
+  if (day.resources.length === 0) {
     return (
       <Empty className="h-full">
         <EmptyHeader>
-          <EmptyTitle>Ezen a napon nincs rendelés</EmptyTitle>
-          <EmptyDescription>
-            {site.name} egyik eszköze sem dolgozik ezen a napon. Válasszon másik
-            napot.
-          </EmptyDescription>
+          <EmptyTitle>Ennek a telephelynek még nincs naptára</EmptyTitle>
         </EmptyHeader>
       </Empty>
+    )
+  }
+
+  // A day when nothing works keeps the board's columns, closed, so admins
+  // open a calendar where it lives.
+  if (!range) {
+    const closedColumns = {
+      gridTemplateColumns: [
+        "4rem",
+        ...day.resources.map(() => "minmax(10rem, 1fr)"),
+      ].join(" "),
+    }
+    return (
+      <div className="relative h-full">
+        <div className="flex h-full flex-col overflow-auto overscroll-contain">
+          <div className="flex min-h-full min-w-max flex-col">
+            {headers(closedColumns)}
+            <div className="grid flex-1" style={closedColumns}>
+              <div className="sticky left-0 z-20 border-r bg-card" />
+              {day.resources.map((resource) => (
+                <div
+                  key={resource._id}
+                  className="relative border-r bg-offhours hatch last:border-r-0"
+                >
+                  {/* Past days can't be opened. */}
+                  {isAdmin && date >= today && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="m-2 bg-card dark:bg-card"
+                      aria-label={`Megnyitás: ${resource.name}`}
+                      onClick={() => setOpening(resource)}
+                    >
+                      <CalendarPlusIcon />
+                      Megnyitás
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="pointer-events-none absolute inset-x-4 top-1/2 z-[25] flex -translate-y-1/2 justify-center">
+          <div
+            data-slot="empty"
+            className="w-full max-w-sm rounded-lg border bg-card px-5 py-4 text-center shadow-xs"
+          >
+            <p className="text-base font-medium">Ezen a napon nincs rendelés</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              A {site.name} egyik naptára sem rendel ezen a napon.{" "}
+              {isAdmin && date >= today
+                ? "Válasszon másik napot, vagy nyisson meg egy naptárt a Megnyitás gombbal."
+                : "Válasszon másik napot."}
+            </p>
+          </div>
+        </div>
+        {dialogs}
+      </div>
     )
   }
 
@@ -155,22 +258,7 @@ export function DayBoard() {
   return (
     <div ref={scrollRef} className="h-full overflow-auto overscroll-contain">
       <div className="min-w-max">
-        <div
-          className="sticky top-0 z-30 grid border-b bg-card"
-          style={columns}
-        >
-          <div className="sticky left-0 z-10 border-r bg-card" />
-          {day.resources.map((resource) => (
-            <ColumnHeader
-              key={resource._id}
-              resource={resource}
-              appointments={day.appointments.filter(
-                (a) => a.resourceId === resource._id
-              )}
-              onAddClosure={() => setClosing(resource)}
-            />
-          ))}
-        </div>
+        {headers(columns)}
 
         <div className="relative grid" style={{ ...columns, height }}>
           <div className="sticky left-0 z-20 border-r bg-card" aria-hidden>
@@ -205,11 +293,7 @@ export function DayBoard() {
           {showNow && <NowLine minutes={nowMinutes} rangeStart={range.start} />}
         </div>
       </div>
-      <ClosureDialog
-        calendar={closing}
-        calendars={day.resources}
-        onClose={() => setClosing(null)}
-      />
+      {dialogs}
     </div>
   )
 }
@@ -217,12 +301,19 @@ export function DayBoard() {
 function ColumnHeader({
   resource,
   appointments,
+  isAdmin,
   onAddClosure,
+  onAddOpening,
+  onEditHours,
 }: {
   resource: Resource
   appointments: Appointment[]
+  isAdmin: boolean
   onAddClosure: () => void
+  onAddOpening: () => void
+  onEditHours: () => void
 }) {
+  const headerRef = useRef<HTMLDivElement>(null)
   const busy = appointments
     .filter((a) => occupiesSlot(a.status))
     .map((a) => ({ start: a.startAt, end: a.endAt }))
@@ -232,21 +323,59 @@ function ColumnHeader({
     working > 0 ? Math.round(((working - free) / working) * 100) : null
 
   return (
-    <div className="flex min-w-0 flex-col gap-1 border-r px-3 py-2 last:border-r-0">
+    <div
+      ref={headerRef}
+      className="flex min-w-0 flex-col gap-1 border-r px-3 py-2 last:border-r-0"
+    >
       <div className="flex items-center gap-1">
         <span className="min-w-0 flex-1 truncate text-sm font-semibold">
           {resource.name}
         </span>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          className="-my-1 -mr-1.5 text-muted-foreground"
-          aria-label={`Zárás rögzítése: ${resource.name}`}
-          title="Zárás rögzítése"
-          onClick={onAddClosure}
-        >
-          <CalendarOffIcon />
-        </Button>
+        {resource.openings.length > 0 && (
+          <OpeningsBadge
+            resource={resource}
+            appointments={appointments}
+            isAdmin={isAdmin}
+            anchor={headerRef}
+          />
+        )}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                // 40 px to touch on phones; the negative margin keeps the
+                // header row its desktop height.
+                className="-my-1 -mr-1.5 text-muted-foreground max-sm:-my-2.5 max-sm:size-10"
+                aria-label={`Naptár beállításai: ${resource.name}`}
+                title="Naptár beállításai"
+              />
+            }
+          >
+            <EllipsisVerticalIcon />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-auto">
+            <DropdownMenuItem onClick={onAddClosure}>
+              <CalendarOffIcon />
+              Zárás rögzítése…
+            </DropdownMenuItem>
+            {isAdmin && (
+              <>
+                <DropdownMenuItem onClick={onAddOpening}>
+                  <CalendarPlusIcon />
+                  Rendkívüli nyitás rögzítése…
+                </DropdownMenuItem>
+                {/* One day above, every week below. */}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={onEditHours}>
+                  <CalendarClockIcon />
+                  Heti rendelési idő…
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       {load === null ? (
         <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
@@ -258,7 +387,7 @@ function ColumnHeader({
               </span>
             </>
           ) : (
-            "Ma nem rendel"
+            "Nem rendel"
           )}
         </span>
       ) : (
@@ -283,6 +412,139 @@ function ColumnHeader({
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * Marks a calendar that works extra hours today, with their times. The
+ * popover lists them; admins can delete one that holds no bookings.
+ */
+function OpeningsBadge({
+  resource,
+  appointments,
+  isAdmin,
+  anchor,
+}: {
+  resource: Resource
+  appointments: Appointment[]
+  isAdmin: boolean
+  /** The column header; the popover opens below it, clear of its meter. */
+  anchor: React.RefObject<HTMLDivElement | null>
+}) {
+  const spans = resource.openings.map((opening) =>
+    formatTimeRange(opening.startAt, opening.endAt)
+  )
+  return (
+    <Popover>
+      <PopoverTrigger
+        className="-my-1 flex min-w-0 shrink items-center gap-1 rounded-sm bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary outline-none hover:bg-primary/15 focus-visible:ring-2 focus-visible:ring-ring aria-expanded:bg-primary/20"
+        aria-label={`Rendkívüli nyitás: ${spans.join(", ")}`}
+      >
+        <CalendarPlusIcon className="size-3.5 shrink-0" aria-hidden />
+        <span className="truncate">
+          Rendkívüli{" "}
+          {/* Phones keep the column narrow; the popover has the times. */}
+          <span className="tabular max-sm:hidden">
+            {spans[0]}
+            {spans.length > 1 && ` +${spans.length - 1}`}
+          </span>
+        </span>
+      </PopoverTrigger>
+      <PopoverContent align="end" anchor={anchor} className="w-80">
+        <PopoverHeader>
+          <PopoverTitle>{resource.name}: rendkívüli nyitás</PopoverTitle>
+          <PopoverDescription>A heti rendelési időn felül.</PopoverDescription>
+        </PopoverHeader>
+        <ul className="flex flex-col divide-y">
+          {resource.openings.map((opening) => (
+            <OpeningItem
+              key={opening._id}
+              opening={opening}
+              resourceName={resource.name}
+              booked={
+                appointments.filter(
+                  (a) =>
+                    occupiesSlot(a.status) &&
+                    a.startAt < opening.endAt &&
+                    opening.startAt < a.endAt
+                ).length
+              }
+              isAdmin={isAdmin}
+            />
+          ))}
+        </ul>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function OpeningItem({
+  opening,
+  resourceName,
+  booked,
+  isAdmin,
+}: {
+  opening: Opening
+  resourceName: string
+  /** Bookings inside the opening; while there are any it can't be deleted. */
+  booked: number
+  isAdmin: boolean
+}) {
+  const removeOpening = useMutation(api.schedule.removeOpening)
+  const [removing, setRemoving] = useState(false)
+
+  async function remove() {
+    setRemoving(true)
+    try {
+      await removeOpening({ openingId: opening._id })
+      toast.success("Rendkívüli nyitás törölve", {
+        description: `${resourceName}: ez az idő már nem foglalható.`,
+      })
+    } catch (error) {
+      toast.error(errorMessage(error))
+      setRemoving(false)
+    }
+  }
+
+  return (
+    <li className="flex flex-col gap-1.5 py-2 text-sm first:pt-0 last:pb-0">
+      <span className="font-medium tabular">
+        {formatTimeRange(opening.startAt, opening.endAt)}
+      </span>
+      {opening.note && (
+        <span className="flex gap-1.5 text-muted-foreground">
+          <MessageSquareTextIcon
+            className="mt-0.5 size-3.5 shrink-0"
+            aria-label="Megjegyzés"
+          />
+          {opening.note}
+        </span>
+      )}
+      <span className="tabular">
+        {booked > 0 ? `${booked} foglalás erre az időre` : "Még nincs foglalás"}
+      </span>
+      {/* A blocked delete is a lock line, not a disabled button, which
+          read as enabled in dark. */}
+      {isAdmin &&
+        (booked > 0 ? (
+          <span className="flex gap-1.5 pt-1 text-muted-foreground">
+            <LockIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+            Amíg foglalás van rajta, nem törölhető. Helyezze át vagy mondja le a
+            foglalásokat.
+          </span>
+        ) : (
+          <Button
+            variant="destructive"
+            size="sm"
+            className="mt-1 self-start"
+            disabled={removing}
+            onClick={() => void remove()}
+          >
+            {removing && <Spinner />}
+            Nyitás törlése
+          </Button>
+        ))}
+    </li>
   )
 }
 
@@ -326,6 +588,20 @@ function Column({
   return (
     <div className="relative border-r text-foreground last:border-r-0">
       <div className="absolute inset-0 bg-offhours hatch" aria-hidden />
+      {/* Extra hours carry a perforated rail on the column's right edge,
+          the opposite of the closed hatch; the header chip names them. */}
+      {resource.openings.map((opening) => (
+        <div
+          key={opening._id}
+          aria-hidden
+          className="pointer-events-none absolute right-0 z-[3] w-[3px] bg-[repeating-linear-gradient(to_bottom,var(--primary)_0_6px,transparent_6px_10px)]"
+          style={{
+            top: y(opening.startAt),
+            height:
+              ((opening.endAt - opening.startAt) / MINUTE_MS) * PX_PER_MINUTE,
+          }}
+        />
+      ))}
       {resource.working.map((shift) => (
         <div
           key={shift.start}

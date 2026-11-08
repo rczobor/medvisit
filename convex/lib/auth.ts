@@ -1,3 +1,4 @@
+import type { Doc } from "../_generated/dataModel"
 import type { QueryCtx } from "../_generated/server"
 import { fail } from "./errors"
 
@@ -27,5 +28,22 @@ export async function requireStaff(ctx: QueryCtx) {
     )
     .unique()
   if (!staff) fail("FORBIDDEN")
+  return staff
+}
+
+/**
+ * Whether staff may change when calendars work: weekly hours and extra
+ * openings. The demo identity counts as an admin so people trying the demo
+ * can use these tools; it only resolves on synthetic deployments.
+ */
+export function isAdmin(staff: Doc<"staff">) {
+  return (
+    staff.role === "admin" || staff.tokenIdentifier === DEMO_TOKEN_IDENTIFIER
+  )
+}
+
+export async function requireAdmin(ctx: QueryCtx) {
+  const staff = await requireStaff(ctx)
+  if (!isAdmin(staff)) fail("FORBIDDEN")
   return staff
 }

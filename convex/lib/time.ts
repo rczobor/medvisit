@@ -51,6 +51,10 @@ export function parseWallTime(time: WallTime) {
   return { hour: Number(match[1]), minute: Number(match[2]) }
 }
 
+export function isWallTime(value: string): value is WallTime {
+  return wallTimePattern.test(value)
+}
+
 /** ISO weekday of a calendar date: 1 = Monday … 7 = Sunday. */
 export function isoWeekday(date: LocalDate) {
   const { year, month, day } = parseLocalDate(date)
