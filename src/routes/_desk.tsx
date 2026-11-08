@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { Outlet, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useQuery } from "convex/react"
 import { api } from "../../convex/_generated/api"
@@ -6,7 +7,7 @@ import { AppHeader } from "@/components/app-header"
 import { AppointmentSheet } from "@/components/appointment-sheet"
 import { BookingSheet } from "@/components/booking-sheet"
 import { DeskContext } from "@/components/desk-context"
-import type { Desk } from "@/components/desk-context"
+import type { BookingDraft, Desk } from "@/components/desk-context"
 import { Button } from "@/components/ui/button"
 import {
   Empty,
@@ -27,6 +28,7 @@ export const Route = createFileRoute("/_desk")({
 
 function DeskLayout() {
   const search = Route.useSearch()
+  const [bookingDraft, setBookingDraft] = useState<BookingDraft | null>(null)
   const navigate = useNavigate()
   const now = useNow()
   const sites = useQuery(api.catalog.sites)
@@ -68,6 +70,8 @@ function DeskLayout() {
       update({ appointment: appointmentId, book: undefined, at: undefined }),
     openBooking: (resourceId, at) =>
       update({ book: resourceId ?? "any", at, appointment: undefined }),
+    bookingDraft,
+    setBookingDraft,
   }
 
   return (

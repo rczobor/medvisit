@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useMutation, useQuery } from "convex/react"
 import { cn } from "cn"
 import { ClockIcon, DropletIcon, InfoIcon, UserPlusIcon } from "lucide-react"
@@ -153,6 +153,16 @@ function BookingForm({
         : null
   const end =
     start !== null && slots ? start + slots.durationMinutes * MINUTE_MS : null
+
+  // Show the chosen slot on the board behind the sheet, so staff can see its
+  // neighbours while they confirm it with the patient.
+  const { setBookingDraft } = desk
+  const draftResourceId = resource?._id ?? null
+  useEffect(() => {
+    if (draftResourceId === null || start === null || end === null) return
+    setBookingDraft({ resourceId: draftResourceId, startAt: start, endAt: end })
+    return () => setBookingDraft(null)
+  }, [draftResourceId, start, end, setBookingDraft])
 
   const ready =
     resource && selectedService && start !== null && end !== null && patient

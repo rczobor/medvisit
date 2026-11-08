@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react"
+import { useEffect, useLayoutEffect, useRef } from "react"
 import { useQuery } from "convex/react"
 import type { FunctionReturnType } from "convex/server"
 import { cn } from "cn"
@@ -7,6 +7,7 @@ import {
   GlobeIcon,
   HandshakeIcon,
   MessageSquareTextIcon,
+  PlusIcon,
 } from "lucide-react"
 import { api } from "../../convex/_generated/api"
 import { subtractIntervals } from "../../convex/lib/availability"
@@ -238,9 +239,14 @@ function Column({
   appointments: Appointment[]
   rangeStart: number
 }) {
-  const { date, openBooking } = useDesk()
+  const { date, openBooking, bookingDraft } = useDesk()
   const y = (instant: number) =>
     (minutesOf(instant) - rangeStart) * PX_PER_MINUTE
+  const draft =
+    bookingDraft?.resourceId === resource._id &&
+    instantToZoned(bookingDraft.startAt).date === date
+      ? bookingDraft
+      : null
 
   // Clicking open working time starts a booking at that time.
   const onClick = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -293,7 +299,64 @@ function Column({
           }
         />
       ))}
+      {draft && (
+        <DraftBlock
+          startAt={draft.startAt}
+          endAt={draft.endAt}
+          top={y(draft.startAt)}
+          height={((draft.endAt - draft.startAt) / MINUTE_MS) * PX_PER_MINUTE}
+        />
+      )}
     </div>
+  )
+}
+
+/**
+ * The slot being booked, drawn as a dashed placeholder. The booking sheet
+ * carries the details, so it is hidden from assistive tech. It scrolls into
+ * view when the chosen time changes.
+ */
+function DraftBlock({
+  startAt,
+  endAt,
+  top,
+  height,
+}: {
+  startAt: number
+  endAt: number
+  top: number
+  height: number
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    ref.current?.scrollIntoView({ block: "nearest", inline: "nearest" })
+  }, [startAt])
+
+  return (
+    <>
+      <div
+        ref={ref}
+        aria-hidden
+        // Above booked blocks (10), below the selected block (15). The scroll
+        // margins keep its neighbours in view and clear the sticky header and
+        // time gutter. From `sm` the booking sheet covers the right 32rem of
+        // the board, so the right margin reveals the draft left of the sheet.
+        className="pointer-events-none absolute inset-x-1 z-[12] flex scroll-mt-32 scroll-mb-24 scroll-ml-18 items-center gap-1.5 overflow-hidden rounded-sm border border-dashed border-primary bg-primary/10 px-2 text-xs leading-tight text-primary sm:scroll-mr-[32rem]"
+        style={{ top: top + 1, height: Math.max(height - 2, 14) }}
+      >
+        <PlusIcon className="size-3.5 shrink-0" />
+        <span className="shrink-0 font-semibold tabular">
+          {formatTimeRange(startAt, endAt)}
+        </span>
+        <span className="truncate">Új foglalás</span>
+      </div>
+      {/* Lets the board scroll far enough to clear the sheet for the last
+          calendars. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute top-0 left-full hidden h-px w-[32rem] sm:block"
+      />
+    </>
   )
 }
 
@@ -345,8 +408,8 @@ function AppointmentBlock({
         // A no-show releases its slot; a rebooking on top of it must stay readable.
         occupiesSlot(status) ? "z-10" : "z-[2]",
         // The block whose details are open stays marked while staff work in the sheet.
-        // Layering: now-line 1 < no-show 2 < booked 10 < selected 15 <
-        // focused 16 < sticky gutter 20, now label 25, header 30.
+        // Layering: now-line 1 < no-show 2 < booked 10 < booking draft 12 <
+        // selected 15 < focused 16 < sticky gutter 20, now label 25, header 30.
         selected && "z-[15] shadow-md ring-2 ring-primary"
       )}
       style={{ top: top + 1, height: Math.max(height - 2, 14) }}
