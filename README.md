@@ -60,37 +60,25 @@ git clone git@github.com:rczobor/medvisit.git /docker/medvisit-demo
 cd /docker/medvisit-demo
 docker compose -f docker-compose.demo.yml up -d --build
 # Keep the admin key out of shell history and the repo:
-docker compose -f docker-compose.demo.yml exec convex-backend \
-  ./generate_admin_key.sh | tail -1 > /docker/medvisit-demo.admin-key
-chmod 600 /docker/medvisit-demo.admin-key
+(umask 077 && docker compose -f docker-compose.demo.yml exec -T convex-backend \
+  ./generate_admin_key.sh | tail -1 > /docker/medvisit-demo.admin-key)
+CONVEX_SELF_HOSTED_ADMIN_KEY="$(cat /docker/medvisit-demo.admin-key)" \
+  docker compose -f docker-compose.demo.yml run --rm -T \
+  -e CONVEX_SELF_HOSTED_ADMIN_KEY web \
+  pnpm convex env set MEDVISIT_SYNTHETIC_DEMO true
+scripts/deploy-demo.sh --reseed
 tailscale serve --bg --https=8443 http://127.0.0.1:3430
 ```
 
-Deploy the functions. Run this after first setup and after each update:
+To roll out the latest merged `main`, from a tailnet machine with SSH access:
 
 ```bash
-export CONVEX_SELF_HOSTED_ADMIN_KEY="$(cat /docker/medvisit-demo.admin-key)"
-demo() {
-  docker compose -f docker-compose.demo.yml run --rm \
-    -e CONVEX_SELF_HOSTED_ADMIN_KEY web "$@"
-}
-demo pnpm convex:deploy
+ssh demo-host /docker/medvisit-demo/scripts/deploy-demo.sh
 ```
 
-On first setup only, mark the deployment synthetic and load the demo data:
+The script refuses a checkout with local changes and deploys `origin/main`
+only. It builds the image, deploys the functions, swaps the web server, waits
+until it answers, and removes the demo's superseded images.
 
-```bash
-demo pnpm convex env set MEDVISIT_SYNTHETIC_DEMO true
-demo pnpm seed
-```
-
-To update, check out the new `main`, rebuild, then deploy the functions as
-above:
-
-```bash
-git fetch origin && git checkout --detach origin/main
-docker compose -f docker-compose.demo.yml up -d --build
-```
-
-`demo pnpm seed` wipes the demo data and starts it over. Run it only when that
-is wanted, for example after the week the seed covers has passed.
+`--reseed` also wipes the demo data and loads fresh synthetic data. Use it only
+when that is wanted, for example after the week the seed covers has passed.

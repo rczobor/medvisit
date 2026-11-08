@@ -88,6 +88,18 @@ project, its volume and Tailscale serve port 8443. Never change the host's
 other projects, volumes or networks. People use the demo to try the app:
 deploy it only from merged `main`, and don't reseed it unasked.
 
+After every PR you merge to `main`, roll the demo out and report the revision
+it runs. Robi asked for this as a standing rule on 2026-11-08:
+
+```bash
+ssh demo-host /docker/medvisit-demo/scripts/deploy-demo.sh
+```
+
+Run it once the PR shows as merged, and check that the revision it reports is
+that merge or later. If it fails, stop and report its output. Don't retry with
+`--reseed`, run other commands on the demo host or edit its checkout: fix
+forward with a PR to `main`.
+
 ## Verification
 
 - While iterating, run `pnpm test` plus `pnpm typecheck`.
