@@ -1,0 +1,8 @@
+.git
+node_modules
+dist
+design-review
+test-results
+playwright-report
+.env*
+!.env.example

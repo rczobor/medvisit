@@ -83,6 +83,11 @@ services use other ports and volumes; never stop, prune or reuse them from
 here. The Convex CLI and the dev server talk to loopback ports, so run them
 outside the agent sandbox.
 
+The on-prem demo (README: On-prem demo) runs on a shared host. There, touch only the `medvisit-demo` Compose
+project, its volume and Tailscale serve port 8443. Never change the host's
+other projects, volumes or networks. People use the demo to try the app:
+deploy it only from merged `main`, and don't reseed it unasked.
+
 ## Verification
 
 - While iterating, run `pnpm test` plus `pnpm typecheck`.
