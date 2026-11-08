@@ -56,7 +56,13 @@ import {
 import { errorCode, errorMessage } from "@/lib/labels"
 
 export type BookingRequest =
-  | { kind: "new"; resource: Id<"resources"> | "any"; at?: string }
+  | {
+      kind: "new"
+      resource: Id<"resources"> | "any"
+      at?: string
+      /** Starts the booking with this patient chosen. */
+      patientId?: Id<"patients">
+    }
   | { kind: "move"; appointmentId: Id<"appointments"> }
 
 export function BookingSheet({
@@ -207,6 +213,26 @@ function BookingForm({
   const [pickedStart, setPickedStart] = useState<number | null>(null)
   const [chosenPatient, setPatient] = useState<PatientSummary | null>(null)
   const patient = moving?.patient ?? chosenPatient
+  // A booking started from a patient's card arrives with that patient chosen;
+  // staff can still pick another.
+  const prefill = useQuery(
+    api.patients.get,
+    request.kind === "new" && request.patientId
+      ? { patientId: request.patientId }
+      : "skip"
+  )
+  const [prefilled, setPrefilled] = useState(false)
+  if (!prefilled && prefill) {
+    setPrefilled(true)
+    setPatient({
+      _id: prefill.patient._id,
+      familyName: prefill.patient.familyName,
+      givenName: prefill.patient.givenName,
+      birthDate: prefill.patient.birthDate,
+      taj: prefill.patient.taj,
+      phone: prefill.patient.phone,
+    })
+  }
   const [creatingPatient, setCreatingPatient] = useState<string | null>(null)
   const [note, setNote] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -508,7 +534,7 @@ function BookingForm({
               id="new-patient-form"
               initialText={creatingPatient}
               today={desk.today}
-              onCreated={(created) => {
+              onSaved={(created) => {
                 setPatient(created)
                 setCreatingPatient(null)
               }}

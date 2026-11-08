@@ -17,6 +17,10 @@ export type DeskSearch = {
   at?: string
   /** Open the booking sheet to move this appointment to a new time. */
   move?: Id<"appointments">
+  /** Open a patient's card, or patient search ("search"). */
+  patient?: Id<"patients"> | "search"
+  /** The patient a new booking is for, chosen before the sheet opened. */
+  for?: Id<"patients">
 }
 
 const text = (value: unknown) =>
@@ -38,5 +42,7 @@ export function validateDeskSearch(
     book: text(search.book) as Id<"resources"> | "any" | undefined,
     at: at && /^([01]\d|2[0-3]):[0-5]\d$/.test(at) ? at : undefined,
     move: text(search.move) as Id<"appointments"> | undefined,
+    patient: text(search.patient) as Id<"patients"> | "search" | undefined,
+    for: text(search.for) as Id<"patients"> | undefined,
   }
 }

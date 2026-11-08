@@ -18,8 +18,18 @@ export type Desk = {
   now: number
   /** The appointment whose details are open, if any. */
   selectedAppointment: Id<"appointments"> | null
-  openAppointment: (appointmentId: Id<"appointments">) => void
-  openBooking: (resourceId?: Id<"resources">, at?: string) => void
+  /** Opens an appointment; with `on`, also shows its site and day. */
+  openAppointment: (
+    appointmentId: Id<"appointments">,
+    on?: { site: Id<"sites">; date: LocalDate }
+  ) => void
+  openBooking: (
+    resourceId?: Id<"resources">,
+    at?: string,
+    patientId?: Id<"patients">
+  ) => void
+  /** Opens a patient's card, or patient search. */
+  openPatient: (target: Id<"patients"> | "search") => void
   /** Opens the booking sheet to move a booked appointment. */
   openMove: (appointmentId: Id<"appointments">) => void
   bookingDraft: BookingDraft | null

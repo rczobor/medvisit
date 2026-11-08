@@ -79,7 +79,7 @@ function AppointmentDetails({
 }: {
   appointmentId: Id<"appointments">
 }) {
-  const { today, now, openMove } = useDesk()
+  const { today, now, openMove, openPatient } = useDesk()
   const appointment = useQuery(api.schedule.appointment, { appointmentId })
   const setStatus = useMutation(api.schedule.setStatus)
   const [pending, setPending] = useState<AppointmentStatus | null>(null)
@@ -144,9 +144,18 @@ function AppointmentDetails({
             ? `${patient.familyName} ${patient.givenName}`
             : "Ismeretlen páciens"}
         </SheetTitle>
-        <SheetDescription className="flex flex-wrap gap-x-4 tabular">
+        <SheetDescription className="flex flex-wrap items-baseline gap-x-4 tabular">
           {patient && <span>Szül.: {formatDate(patient.birthDate)}</span>}
           {patient?.taj && <span>TAJ: {formatTaj(patient.taj)}</span>}
+          {patient && (
+            <button
+              type="button"
+              className="rounded-sm text-primary outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => openPatient(patient._id)}
+            >
+              Páciens adatlapja
+            </button>
+          )}
         </SheetDescription>
         <StatusBadge status={status} className="font-medium" />
       </SheetHeader>

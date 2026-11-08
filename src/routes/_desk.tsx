@@ -6,6 +6,7 @@ import { todayInClinic } from "../../convex/lib/time"
 import { AppHeader } from "@/components/app-header"
 import { AppointmentSheet } from "@/components/appointment-sheet"
 import { BookingSheet } from "@/components/booking-sheet"
+import { PatientSheet } from "@/components/patient-sheet"
 import { DeskContext } from "@/components/desk-context"
 import type { BookingDraft, Desk } from "@/components/desk-context"
 import { Button } from "@/components/ui/button"
@@ -66,19 +67,36 @@ function DeskLayout() {
     today,
     now,
     selectedAppointment: search.appointment ?? null,
-    openAppointment: (appointmentId) =>
+    openAppointment: (appointmentId, on) =>
       update({
         appointment: appointmentId,
         book: undefined,
         at: undefined,
         move: undefined,
+        patient: undefined,
+        for: undefined,
+        ...(on && {
+          site: on.site,
+          date: on.date === today ? undefined : on.date,
+        }),
       }),
-    openBooking: (resourceId, at) =>
+    openBooking: (resourceId, at, patientId) =>
       update({
         book: resourceId ?? "any",
         at,
+        for: patientId,
         appointment: undefined,
         move: undefined,
+        patient: undefined,
+      }),
+    openPatient: (target) =>
+      update({
+        patient: target,
+        appointment: undefined,
+        book: undefined,
+        at: undefined,
+        move: undefined,
+        for: undefined,
       }),
     openMove: (appointmentId) =>
       update({
@@ -104,7 +122,12 @@ function DeskLayout() {
           search.move !== undefined
             ? { kind: "move", appointmentId: search.move }
             : search.book !== undefined
-              ? { kind: "new", resource: search.book, at: search.at }
+              ? {
+                  kind: "new",
+                  resource: search.book,
+                  at: search.at,
+                  patientId: search.for,
+                }
               : null
         }
         // Closing a move returns to the appointment it started from.
@@ -112,6 +135,7 @@ function DeskLayout() {
           update({
             book: undefined,
             at: undefined,
+            for: undefined,
             move: undefined,
             appointment: search.move,
           })
@@ -120,6 +144,7 @@ function DeskLayout() {
           update({
             book: undefined,
             at: undefined,
+            for: undefined,
             date: date === today ? undefined : date,
           })
         }
@@ -134,6 +159,10 @@ function DeskLayout() {
       <AppointmentSheet
         appointmentId={search.appointment ?? null}
         onClose={() => update({ appointment: undefined })}
+      />
+      <PatientSheet
+        target={search.patient ?? null}
+        onClose={() => update({ patient: undefined })}
       />
     </DeskContext>
   )

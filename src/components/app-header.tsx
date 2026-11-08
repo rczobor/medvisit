@@ -6,6 +6,7 @@ import {
   MoonIcon,
   PlusIcon,
   SunIcon,
+  UserSearchIcon,
 } from "lucide-react"
 import { useTheme } from "next-themes"
 import type { Id } from "../../convex/_generated/dataModel"
@@ -31,7 +32,7 @@ export function AppHeader({
 }: {
   sites: { _id: Id<"sites">; name: string }[]
 }) {
-  const { site, date, today, openBooking } = useDesk()
+  const { site, date, today, openBooking, openPatient } = useDesk()
   const navigate = useNavigate()
   const { resolvedTheme, setTheme } = useTheme()
 
@@ -177,6 +178,14 @@ export function AppHeader({
       </nav>
 
       <div className="order-2 ml-auto flex items-center gap-1 lg:order-5">
+        <Button
+          variant="outline"
+          aria-label="Páciens keresése"
+          onClick={() => openPatient("search")}
+        >
+          <UserSearchIcon />
+          <span className="max-sm:hidden">Páciens</span>
+        </Button>
         <Button onClick={() => openBooking()}>
           <PlusIcon />
           Új foglalás

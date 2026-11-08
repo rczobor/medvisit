@@ -22,6 +22,14 @@ export type PatientSummary = {
   phone: string | null
 }
 
+/** A stored patient, as the patient card loads it, for editing. */
+export type PatientRecord = PatientSummary & {
+  sex: Sex
+  birthPlace: string | null
+  mothersName: string | null
+  email: string | null
+}
+
 const empty = {
   familyName: "",
   givenName: "",
@@ -62,29 +70,44 @@ function validate(values: Values, sex: Sex | null, today: string): Errors {
 }
 
 /**
- * The new-patient form. Its submit and cancel buttons are rendered by the
- * caller in the sheet footer (associated through `id`), so they sit at the
- * sheet's bottom edge on every screen size.
+ * The patient form: creates a patient, or with `patient` edits one. Its
+ * submit and cancel buttons are rendered by the caller in the sheet footer
+ * (associated through `id`), so they sit at the sheet's bottom edge on every
+ * screen size.
  */
 export function PatientForm({
   id,
-  initialText,
+  initialText = "",
+  patient,
   today,
-  onCreated,
+  onSaved,
   onSavingChange,
 }: {
   id: string
-  initialText: string
+  /** Search text a new patient's name is taken from. */
+  initialText?: string
+  patient?: PatientRecord
   today: string
-  onCreated: (patient: PatientSummary) => void
+  onSaved: (patient: PatientSummary) => void
   onSavingChange: (saving: boolean) => void
 }) {
   const create = useMutation(api.patients.create)
-  const [values, setValues] = useState<Values>({
-    ...empty,
-    ...namesFrom(initialText),
-  })
-  const [sex, setSex] = useState<Sex | null>(null)
+  const update = useMutation(api.patients.update)
+  const [values, setValues] = useState<Values>(() =>
+    patient
+      ? {
+          familyName: patient.familyName,
+          givenName: patient.givenName,
+          birthDate: patient.birthDate,
+          taj: patient.taj ? formatTaj(patient.taj) : "",
+          phone: patient.phone ?? "",
+          email: patient.email ?? "",
+          birthPlace: patient.birthPlace ?? "",
+          mothersName: patient.mothersName ?? "",
+        }
+      : { ...empty, ...namesFrom(initialText) }
+  )
+  const [sex, setSex] = useState<Sex | null>(patient?.sex ?? null)
   const [errors, setErrors] = useState<Errors>({})
   const [saving, setSaving] = useState(false)
   const formRef = useRef<HTMLFormElement>(null)
@@ -112,19 +135,22 @@ export function PatientForm({
     setSaving(true)
     onSavingChange(true)
     const taj = normalizeTaj(values.taj)
+    const fields = {
+      familyName: values.familyName,
+      givenName: values.givenName,
+      sex,
+      birthDate: values.birthDate,
+      taj: taj || undefined,
+      phone: values.phone || undefined,
+      email: values.email || undefined,
+      birthPlace: values.birthPlace || undefined,
+      mothersName: values.mothersName || undefined,
+    }
     try {
-      const patientId = await create({
-        familyName: values.familyName,
-        givenName: values.givenName,
-        sex,
-        birthDate: values.birthDate,
-        taj: taj || undefined,
-        phone: values.phone || undefined,
-        email: values.email || undefined,
-        birthPlace: values.birthPlace || undefined,
-        mothersName: values.mothersName || undefined,
-      })
-      onCreated({
+      let patientId = patient?._id
+      if (patientId) await update({ patientId, ...fields })
+      else patientId = await create(fields)
+      onSaved({
         _id: patientId,
         familyName: values.familyName.trim(),
         givenName: values.givenName.trim(),
