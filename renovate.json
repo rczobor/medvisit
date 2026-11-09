@@ -1,0 +1,32 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "minimumReleaseAge": "3 days",
+  "rangeStrategy": "bump",
+  "customManagers": [
+    {
+      "description": "The Dockerfile installs the pnpm that packageManager pins, so both move in the same PR.",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)Dockerfile$/"],
+      "matchStrings": ["pnpm@(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "depNameTemplate": "pnpm",
+      "datasourceTemplate": "npm"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Group all non-major updates into one PR.",
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "all non-major dependencies",
+      "groupSlug": "all-minor-patch"
+    },
+    {
+      "description": "Group Docker digest updates. Digests carry no release timestamp, so the release-age gate would hold them forever.",
+      "matchDatasources": ["docker"],
+      "matchUpdateTypes": ["digest"],
+      "groupName": "Docker image digests",
+      "groupSlug": "docker-digests",
+      "minimumReleaseAge": null
+    }
+  ]
+}
