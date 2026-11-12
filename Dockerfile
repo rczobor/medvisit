@@ -4,7 +4,7 @@
 # to deploy functions and seed synthetic data (README: On-prem demo).
 FROM node:26.13.0-trixie-slim
 
-RUN npm install --global pnpm@12.16.1
+RUN npm install --global pnpm@12.18.0
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
