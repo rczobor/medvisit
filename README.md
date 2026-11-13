@@ -9,7 +9,9 @@ This is an early demo. It runs on synthetic data only.
 ## Stack
 
 - TanStack Start (Vite, React 19), Tailwind CSS 4, shadcn/ui on Base UI
-- Convex, self-hosted in Docker for development and the on-prem demo
+- Convex: self-hosted in Docker for development, Convex Cloud (EU) for the
+  hosted demo
+- Clerk for staff sign-in; the demo is hosted on Vercel
 - Vitest with `convex-test` for domain and backend tests
 
 ## Local setup
@@ -22,10 +24,16 @@ pnpm convex:up                      # local Convex on 127.0.0.1:3410/3411
 cp .env.example .env.local          # then paste the key from:
 pnpm convex:admin-key
 pnpm convex env set MEDVISIT_SYNTHETIC_DEMO true
+pnpm convex env set MEDVISIT_DEMO_WITHOUT_SIGN_IN true
 pnpm convex:deploy                  # push functions and schema
 pnpm seed                           # synthetic sites, patients and bookings
 pnpm dev                            # http://localhost:3400
 ```
+
+Locally there is no sign-in: without `VITE_CLERK_PUBLISHABLE_KEY` the app
+sends no token, and `MEDVISIT_DEMO_WITHOUT_SIGN_IN` lets the backend answer as
+the demo receptionist. Never set that flag on a deployment others can reach. A
+local backend set up before sign-in existed needs that `env set` line too.
 
 `pnpm seed` anchors the demo on today. For repeatable screenshots, pin the day
 and the clock:
@@ -43,42 +51,30 @@ pnpm lint
 pnpm build
 ```
 
-## On-prem demo
+## Hosted demo
 
-The demo runs on a shared host as its own
-Compose project `medvisit-demo` with its own Convex backend and volume. It
-never touches the host's other projects. The web container serves the build
-with `vite preview` and passes `/convex` through to the demo backend, so the
-browser needs one address. Only that container is published, on loopback, and
-`tailscale serve` exposes it to the tailnet over HTTPS:
-`https://demo-host.example.ts.net:8443`.
+The demo runs on Vercel at <https://medvisit.vercel.app>, with its backend on
+Convex Cloud (project `medvisit`, production deployment in the EU). Only people
+invited in the MedVisit Clerk app can sign in; on the demo's synthetic data,
+each of them acts as the demo receptionist.
 
-First setup, on the host:
+Vercel builds every push to `main` and nothing else: `vercel.json` skips other
+branches, and the project has preview deployments turned off. Both platforms
+run on free plans, so there are no Convex preview deployments either. The build
+runs `convex deploy`, which pushes the functions and schema with the
+`CONVEX_DEPLOY_KEY` set on the Vercel project, then builds the static app
+against that deployment. The build also needs the project's
+`VITE_CLERK_PUBLISHABLE_KEY`: without it the app has no sign-in and every
+request fails.
 
-```bash
-git clone git@github.com:rczobor/medvisit.git /docker/medvisit-demo
-cd /docker/medvisit-demo
-docker compose -f docker-compose.demo.yml up -d --build
-# Keep the admin key out of shell history and the repo:
-(umask 077 && docker compose -f docker-compose.demo.yml exec -T convex-backend \
-  ./generate_admin_key.sh | tail -1 > /docker/medvisit-demo.admin-key)
-CONVEX_SELF_HOSTED_ADMIN_KEY="$(cat /docker/medvisit-demo.admin-key)" \
-  docker compose -f docker-compose.demo.yml run --rm -T \
-  -e CONVEX_SELF_HOSTED_ADMIN_KEY web \
-  pnpm convex env set MEDVISIT_SYNTHETIC_DEMO true
-scripts/deploy-demo.sh --reseed
-tailscale serve --bg --https=8443 http://127.0.0.1:3430
-```
+The Convex deployment has `MEDVISIT_SYNTHETIC_DEMO=true` and
+`CLERK_JWT_ISSUER_DOMAIN`. It never has `MEDVISIT_DEMO_WITHOUT_SIGN_IN`. The
+Clerk instance adds `aud: convex` to session tokens, which `convex/auth.config.ts`
+requires.
 
-To roll out the latest merged `main`, from a tailnet machine with SSH access:
+To reload synthetic data, for example after the week the seed covers has
+passed, run with a production deploy key (from the Convex dashboard):
 
 ```bash
-ssh demo-host /docker/medvisit-demo/scripts/deploy-demo.sh
+read -rs CONVEX_DEPLOY_KEY && export CONVEX_DEPLOY_KEY && pnpm seed
 ```
-
-The script refuses a checkout with local changes and deploys `origin/main`
-only. It builds the image, deploys the functions, swaps the web server, waits
-until it answers, and removes the demo's superseded images.
-
-`--reseed` also wipes the demo data and loads fresh synthetic data. Use it only
-when that is wanted, for example after the week the seed covers has passed.

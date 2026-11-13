@@ -3,6 +3,7 @@ import { convexTest } from "convex-test"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { api } from "./_generated/api"
 import schema from "./schema"
+import { DEMO_TOKEN_IDENTIFIER } from "./lib/auth"
 import { zonedTimeToInstant } from "./lib/time"
 
 const modules = import.meta.glob("./**/*.ts")
@@ -119,19 +120,43 @@ describe("book", () => {
 })
 
 describe("access", () => {
-  test("requires a staff sign-in unless the deployment is a synthetic demo", async () => {
+  const stranger = { tokenIdentifier: "https://issuer.example|stranger" }
+
+  async function withDemoStaff(t: Awaited<ReturnType<typeof setup>>["t"]) {
+    await t.run((ctx) =>
+      ctx.db.insert("staff", {
+        name: "Demó recepció",
+        role: "reception",
+        tokenIdentifier: DEMO_TOKEN_IDENTIFIER,
+      })
+    )
+  }
+
+  test("real data needs a staff record for the signed-in user", async () => {
     const { t, siteId } = await setup()
-    vi.stubEnv("MEDVISIT_SYNTHETIC_DEMO", "")
+    await withDemoStaff(t)
+    vi.stubEnv("MEDVISIT_DEMO_WITHOUT_SIGN_IN", "true")
     await expect(
       t.query(api.schedule.day, { siteId, date: day })
-    ).rejects.toMatchObject({
-      data: { code: "UNAUTHENTICATED" },
-    })
+    ).rejects.toMatchObject({ data: { code: "UNAUTHENTICATED" } })
     await expect(
-      t
-        .withIdentity({ tokenIdentifier: "https://issuer.example|stranger" })
-        .query(api.schedule.day, { siteId, date: day })
+      t.withIdentity(stranger).query(api.schedule.day, { siteId, date: day })
     ).rejects.toMatchObject({ data: { code: "FORBIDDEN" } })
+  })
+
+  test("on synthetic data anyone signed in acts as the demo receptionist", async () => {
+    const { t, siteId } = await setup()
+    await withDemoStaff(t)
+    vi.stubEnv("MEDVISIT_SYNTHETIC_DEMO", "true")
+    await expect(
+      t.query(api.schedule.day, { siteId, date: day })
+    ).rejects.toMatchObject({ data: { code: "UNAUTHENTICATED" } })
+    await t
+      .withIdentity(stranger)
+      .query(api.schedule.day, { siteId, date: day })
+
+    vi.stubEnv("MEDVISIT_DEMO_WITHOUT_SIGN_IN", "true")
+    await t.query(api.schedule.day, { siteId, date: day })
   })
 })
 

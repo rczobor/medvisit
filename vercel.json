@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "npm install --global pnpm@12.18.0 && pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm exec convex deploy --cmd 'pnpm build' --cmd-url-env-var-name VITE_CONVEX_URL",
+  "outputDirectory": "dist/client",
+  "rewrites": [{ "source": "/(.*)", "destination": "/_shell.html" }],
+  "git": { "deploymentEnabled": { "**": false, "main": true } }
+}

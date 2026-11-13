@@ -5,17 +5,11 @@ import tailwindcss from "@tailwindcss/vite"
 
 export default defineConfig({
   resolve: { tsconfigPaths: true },
-  plugins: [tailwindcss(), tanstackStart(), viteReact()],
-  // The on-prem demo serves the build with `vite preview` and passes `/convex`
-  // through to its own Convex backend, so browsers need only one address.
-  preview: {
-    allowedHosts: [".ts.net"],
-    proxy: {
-      "/convex": {
-        target: process.env.MEDVISIT_CONVEX_UPSTREAM ?? "http://127.0.0.1:3410",
-        ws: true,
-        rewrite: (path) => path.replace(/^\/convex/, ""),
-      },
-    },
-  },
+  plugins: [
+    tailwindcss(),
+    // The app renders client-side only (see __root.tsx), so the build is
+    // static files plus a `_shell.html` that every route falls back to.
+    tanstackStart({ spa: { enabled: true } }),
+    viteReact(),
+  ],
 })

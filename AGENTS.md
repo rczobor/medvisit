@@ -14,15 +14,20 @@ sites. The clinical record system stays separate and is out of scope.
 - Development and the demo use synthetic data only. Never import real patient
   data, exports or screenshots of real records into this repository.
 - `MEDVISIT_SYNTHETIC_DEMO=true` marks a deployment that holds only synthetic
-  data. It lets unauthenticated callers act as the demo receptionist and lets
-  `seed:reset` wipe data. Never set it where real patient data exists.
+  data. Anyone who can sign in acts as the demo receptionist there, and
+  `seed:reset` may wipe data. Never set it where real patient data exists.
+- `MEDVISIT_DEMO_WITHOUT_SIGN_IN=true` also lets callers without a sign-in act
+  as the demo receptionist. It is for local development only; never set it on
+  a deployment others can reach, including the hosted demo.
 
 ### 2. Authorization lives in Convex
 
 Public Convex functions are internet-reachable. Every query and mutation calls
 `requireStaff` (or a stricter check) before reading data. Never accept a user
-id as an argument. Staff sign-in (Clerk) is not wired yet; until it is, only
-synthetic deployments answer.
+id as an argument. Staff sign in with Clerk; `convex/auth.config.ts` trusts
+the issuer in `CLERK_JWT_ISSUER_DOMAIN`. Real data needs a `staff` record per
+signed-in user, and nothing creates one yet, so only synthetic deployments
+answer.
 
 ### 3. Booking can't double-book
 
@@ -43,7 +48,7 @@ in or filter on the client. Mutations may use `Date.now()`.
 
 ### 5. Stay portable
 
-The demo runs on-prem. Production hosting is undecided
+The demo runs on Vercel with Convex Cloud. Production hosting is undecided
 (a VPS, or Convex Cloud with Vercel or Cloudflare). Keep business logic in
 Convex and the app server thin. Don't use Node-only APIs or the local disk from
 `src/`. Convex functions use the default runtime unless a separate action file
@@ -83,22 +88,18 @@ services use other ports and volumes; never stop, prune or reuse them from
 here. The Convex CLI and the dev server talk to loopback ports, so run them
 outside the agent sandbox.
 
-The on-prem demo (README: On-prem demo) runs on a shared host. There, touch only the `medvisit-demo` Compose
-project, its volume and Tailscale serve port 8443. Never change the host's
-other projects, volumes or networks. People use the demo to try the app:
-deploy it only from merged `main`, and don't reseed it unasked.
+The hosted demo (README: Hosted demo) is on Vercel and Convex Cloud. Vercel
+deploys every merge to `main` on its own, functions included. After every PR
+you merge, check that the Vercel production deployment for that merge
+succeeded and report it. If it failed, report its build log and fix forward
+with a PR to `main`. People use the demo to try the app: don't reseed it unasked.
 
-After every PR you merge to `main`, roll the demo out and report the revision
-it runs. Robi asked for this as a standing rule on 2026-11-08:
-
-```bash
-ssh demo-host /docker/medvisit-demo/scripts/deploy-demo.sh
-```
-
-Run it once the PR shows as merged, and check that the revision it reports is
-that merge or later. If it fails, stop and report its output. Don't retry with
-`--reseed`, run other commands on the demo host or edit its checkout: fix
-forward with a PR to `main`.
+There are no preview deployments. Vercel and Convex run on free plans, and
+Convex caps how many deployments a week can create. The Vercel project has
+previews turned off, `vercel.json` builds only `main`, and Vercel holds only a
+production Convex deploy key. To let someone try a branch, serve it locally and
+share it over Tailscale. Set up a preview only when Robi asks for one in that
+thread.
 
 ## Verification
 

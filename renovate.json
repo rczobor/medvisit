@@ -5,9 +5,9 @@
   "rangeStrategy": "bump",
   "customManagers": [
     {
-      "description": "The Dockerfile installs the pnpm that packageManager pins, so both move in the same PR.",
+      "description": "vercel.json installs the pnpm that packageManager pins, so both move in the same PR.",
       "customType": "regex",
-      "managerFilePatterns": ["/(^|/)Dockerfile$/"],
+      "managerFilePatterns": ["/(^|/)vercel\\.json$/"],
       "matchStrings": ["pnpm@(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
       "depNameTemplate": "pnpm",
       "datasourceTemplate": "npm"

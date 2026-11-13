@@ -1,3 +1,4 @@
+import { UserButton } from "@clerk/react"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { cn } from "cn"
 import {
@@ -13,6 +14,7 @@ import type { Id } from "../../convex/_generated/dataModel"
 import { addDays, parseLocalDate } from "../../convex/lib/time"
 import { useDesk } from "@/components/desk-context"
 import { DatePicker } from "@/components/date-picker"
+import { signInEnabled } from "@/lib/convex"
 import { Button, buttonVariants } from "@/components/ui/button"
 import {
   Select,
@@ -198,6 +200,11 @@ export function AppHeader({
         >
           {resolvedTheme === "dark" ? <SunIcon /> : <MoonIcon />}
         </Button>
+        {signInEnabled && (
+          <div className="grid size-9 place-items-center">
+            <UserButton />
+          </div>
+        )}
       </div>
     </header>
   )
