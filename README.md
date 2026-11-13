@@ -53,7 +53,7 @@ pnpm build
 
 ## Hosted demo
 
-The demo runs on Vercel at <https://medvisit.vercel.app>, with its backend on
+The demo runs on Vercel at <https://medvisit-eight.vercel.app>, with its backend on
 Convex Cloud (project `medvisit`, production deployment in the EU). Only people
 invited in the MedVisit Clerk app can sign in; on the demo's synthetic data,
 each of them acts as the demo receptionist.
