@@ -6,13 +6,14 @@ sites. The clinical record system stays separate and is out of scope.
 
 ## What must stay true
 
-### 1. Confidential project, synthetic data
+### 1. Public repository, synthetic patients
 
-- Never name the clinic's software vendors or their products in code,
-  comments, commits, PR text, issue text or anything public. The repository
-  stays private.
-- Development and the demo use synthetic data only. Never import real patient
-  data, exports or screenshots of real records into this repository.
+- Treat the code, its history, and PR and issue text as public.
+- Never name the clinic's software vendors or their products. Keep business
+  plans, secrets, deploy keys and internal hostnames out of the repository.
+- Patient and personal data are synthetic. Never import real patient data,
+  exports or screenshots of real records. Clinic configuration (sites,
+  calendars, exams, hours) may be real.
 - `MEDVISIT_SYNTHETIC_DEMO=true` marks a deployment that holds only synthetic
   data. Anyone who can sign in acts as the demo receptionist there, and
   `seed:reset` may wipe data. Never set it where real patient data exists.
