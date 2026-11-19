@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react"
+import { useId, useState } from "react"
 import { useQuery } from "convex/react"
 import type { FunctionReturnType } from "convex/server"
 import { PencilIcon, PlusIcon, SearchIcon } from "lucide-react"
@@ -22,8 +22,9 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Spinner } from "@/components/ui/spinner"
-import { useStableQuery } from "@/hooks/use-stable-query"
+import { usePatientSearch } from "@/hooks/use-patient-search"
 import { formatDate, formatDay, formatTimeRange } from "@/lib/format"
+import { useLastPresent } from "@/hooks/use-last-present"
 
 type Card = NonNullable<FunctionReturnType<typeof api.patients.get>>
 type Visit = Card["appointments"][number]
@@ -36,19 +37,15 @@ export function PatientSheet({
   target: Id<"patients"> | "search" | null
   onClose: () => void
 }) {
-  // Keep the last target while the sheet animates closed.
-  const shown = useRef(target)
-  if (target) shown.current = target
+  const shown = useLastPresent(target)
 
   return (
     <Sheet open={target !== null} onOpenChange={(open) => !open && onClose()}>
       <SheetContent className="gap-0 data-[side=right]:sm:max-w-md">
-        {shown.current === "search" ? (
+        {shown === "search" ? (
           <PatientFinder />
         ) : (
-          shown.current && (
-            <PatientCard key={shown.current} patientId={shown.current} />
-          )
+          shown && <PatientCard key={shown} patientId={shown} />
         )}
       </SheetContent>
     </Sheet>
@@ -59,10 +56,7 @@ function PatientFinder() {
   const { openPatient } = useDesk()
   const [text, setText] = useState("")
   const searching = text.trim().length >= 2
-  const results = useStableQuery(
-    api.patients.search,
-    searching ? { text } : "skip"
-  )
+  const results = usePatientSearch(searching ? { text } : "skip")
 
   return (
     <>

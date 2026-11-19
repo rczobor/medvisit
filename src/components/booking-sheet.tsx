@@ -45,7 +45,7 @@ import {
 } from "@/components/ui/sheet"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
-import { useStableQuery } from "@/hooks/use-stable-query"
+import { usePatientSearch } from "@/hooks/use-patient-search"
 import {
   formatDate,
   formatDay,
@@ -54,6 +54,7 @@ import {
   formatTimeRange,
 } from "@/lib/format"
 import { errorCode, errorMessage } from "@/lib/labels"
+import { useLastPresent } from "@/hooks/use-last-present"
 
 export type BookingRequest =
   | {
@@ -76,10 +77,8 @@ export function BookingSheet({
   onBooked: (date: LocalDate) => void
   onMoved: (appointmentId: Id<"appointments">, date: LocalDate) => void
 }) {
-  // Keep the last request while the sheet animates closed.
-  const shown = useRef(request)
-  if (request) shown.current = request
-  const moving = shown.current?.kind === "move"
+  const shown = useLastPresent(request)
+  const moving = shown?.kind === "move"
 
   return (
     <Sheet open={request !== null} onOpenChange={(open) => !open && onClose()}>
@@ -94,16 +93,14 @@ export function BookingSheet({
               : "A rögzített foglalás azonnal megjelenik a napi táblán."}
           </SheetDescription>
         </SheetHeader>
-        {shown.current?.kind === "move" ? (
+        {shown?.kind === "move" ? (
           <MoveForm
-            key={shown.current.appointmentId}
-            appointmentId={shown.current.appointmentId}
+            key={shown.appointmentId}
+            appointmentId={shown.appointmentId}
             onMoved={onMoved}
           />
         ) : (
-          shown.current && (
-            <BookingForm request={shown.current} onBooked={onBooked} />
-          )
+          shown && <BookingForm request={shown} onBooked={onBooked} />
         )}
       </SheetContent>
     </Sheet>
@@ -329,6 +326,9 @@ function BookingForm({
     if (!resource || !selectedService || start === null || !patient) return
     setSaving(true)
     setError(null)
+    const bookingNote = note.trim() || undefined
+    const done = moving ? "Foglalás áthelyezve" : "Foglalás rögzítve"
+    const description = `${patient.familyName} ${patient.givenName}, ${formatDay(date, currentYear)} ${formatTime(start)}`
     try {
       if (moving) {
         await reschedule({
@@ -342,19 +342,16 @@ function BookingForm({
           serviceId: selectedService._id,
           patientId: patient._id,
           startAt: start,
-          note: note.trim() || undefined,
+          note: bookingNote,
         })
       }
-      toast.success(moving ? "Foglalás áthelyezve" : "Foglalás rögzítve", {
-        description: `${patient.familyName} ${patient.givenName}, ${formatDay(date, currentYear)} ${formatTime(start)}`,
-      })
+      toast.success(done, { description })
       onBooked(date)
     } catch (caught) {
       setError(errorMessage(caught))
       if (errorCode(caught) === "SLOT_TAKEN") setPickedStart(null)
-    } finally {
-      setSaving(false)
     }
+    setSaving(false)
   }
 
   return (
@@ -691,17 +688,15 @@ function SlotPicker({
     )
   }
 
-  let from = 0
-  const groups = dayParts.map((part) => {
-    const group = {
+  const groups = dayParts.map((part, index) => {
+    const from = dayParts[index - 1]?.until ?? 0
+    return {
       label: part.label,
       starts: starts.filter((start) => {
         const minutes = instantToZoned(start).minutes
         return minutes >= from && minutes < part.until
       }),
     }
-    from = part.until
-    return group
   })
 
   return (
@@ -754,10 +749,7 @@ function PatientSearch({
 }) {
   const [text, setText] = useState("")
   const results =
-    useStableQuery(
-      api.patients.search,
-      text.trim().length >= 2 ? { text } : "skip"
-    ) ?? []
+    usePatientSearch(text.trim().length >= 2 ? { text } : "skip") ?? []
 
   return (
     <div className="flex gap-2">

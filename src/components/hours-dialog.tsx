@@ -22,6 +22,7 @@ import { FieldError } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { errorMessage } from "@/lib/labels"
+import { useLastPresent } from "@/hooks/use-last-present"
 
 type Calendar = { _id: Id<"resources">; name: string }
 type Shift = { key: number; start: string; end: string }
@@ -52,9 +53,7 @@ export function HoursDialog({
   calendar: Calendar | null
   onClose: () => void
 }) {
-  // Keep the last calendar while the dialog animates closed.
-  const shown = useRef(calendar)
-  if (calendar) shown.current = calendar
+  const shown = useLastPresent(calendar)
 
   return (
     <Dialog
@@ -62,12 +61,8 @@ export function HoursDialog({
       onOpenChange={(open) => !open && onClose()}
     >
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
-        {shown.current && (
-          <HoursLoader
-            key={shown.current._id}
-            calendar={shown.current}
-            onDone={onClose}
-          />
+        {shown && (
+          <HoursLoader key={shown._id} calendar={shown} onDone={onClose} />
         )}
       </DialogContent>
     </Dialog>
@@ -177,9 +172,8 @@ function HoursForm({
       onDone()
     } catch (error) {
       setFormError(errorMessage(error))
-    } finally {
-      setSaving(false)
     }
+    setSaving(false)
   }
 
   return (

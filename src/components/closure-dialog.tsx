@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useState } from "react"
 import { useMutation } from "convex/react"
 import { toast } from "sonner"
 import { api } from "../../convex/_generated/api"
@@ -28,6 +28,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { errorMessage } from "@/lib/labels"
+import { useLastPresent } from "@/hooks/use-last-present"
 
 type Calendar = { _id: Id<"resources">; name: string }
 
@@ -45,9 +46,7 @@ export function ClosureDialog({
   calendars: Calendar[]
   onClose: () => void
 }) {
-  // Keep the last calendar while the dialog animates closed.
-  const shown = useRef(calendar)
-  if (calendar) shown.current = calendar
+  const shown = useLastPresent(calendar)
 
   return (
     <Dialog
@@ -56,10 +55,10 @@ export function ClosureDialog({
     >
       {/* Scrolls on short screens, such as a phone held sideways. */}
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
-        {shown.current && (
+        {shown && (
           <ClosureForm
-            key={shown.current._id}
-            calendar={shown.current}
+            key={shown._id}
+            calendar={shown}
             calendars={calendars}
             onDone={onClose}
           />
@@ -67,6 +66,12 @@ export function ClosureDialog({
       </DialogContent>
     </Dialog>
   )
+}
+
+function affectedNotice(affected: number) {
+  return affected > 0
+    ? `${affected} foglalás esik erre az időre. Helyezze át vagy mondja le őket.`
+    : undefined
 }
 
 type Errors = Partial<Record<"reason" | "days" | "times" | "form", string>>
@@ -125,27 +130,24 @@ function ClosureForm({
     setErrors(found)
     if (Object.keys(found).length > 0 || startAt === undefined) return
     setSaving(true)
+    const resourceIds = everyCalendar
+      ? calendars.map((candidate) => candidate._id)
+      : [calendar._id]
     try {
       const { affected } = await addClosure({
-        resourceIds: everyCalendar
-          ? calendars.map((candidate) => candidate._id)
-          : [calendar._id],
+        resourceIds,
         startAt,
         endAt,
         reason: reason.trim(),
       })
       toast.success("Zárás rögzítve", {
-        description:
-          affected > 0
-            ? `${affected} foglalás esik erre az időre. Helyezze át vagy mondja le őket.`
-            : undefined,
+        description: affectedNotice(affected),
       })
       onDone()
     } catch (error) {
       setErrors({ form: errorMessage(error) })
-    } finally {
-      setSaving(false)
     }
+    setSaving(false)
   }
 
   return (

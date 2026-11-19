@@ -14,6 +14,12 @@ import {
   ChevronDownIcon,
 } from "lucide-react"
 
+// React Compiler can't compile String.raw inside a component yet.
+const rtlArrows = cn(
+  String.raw`rtl:**:[.rdp-button\_next>svg]:rotate-180`,
+  String.raw`rtl:**:[.rdp-button\_previous>svg]:rotate-180`
+)
+
 function Calendar({
   className,
   classNames,
@@ -34,8 +40,7 @@ function Calendar({
       showOutsideDays={showOutsideDays}
       className={cn(
         "group/calendar bg-background p-2 [--cell-radius:var(--radius-md)] [--cell-size:--spacing(7)] in-data-[slot=card-content]:bg-transparent in-data-[slot=popover-content]:bg-transparent",
-        String.raw`rtl:**:[.rdp-button\_next>svg]:rotate-180`,
-        String.raw`rtl:**:[.rdp-button\_previous>svg]:rotate-180`,
+        rtlArrows,
         className
       )}
       captionLayout={captionLayout}
