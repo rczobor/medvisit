@@ -1,4 +1,4 @@
-import { useRef } from "react"
+import { useState } from "react"
 import { useQuery } from "convex/react"
 import type { OptionalRestArgsOrSkip } from "convex/react"
 import type { FunctionReference } from "convex/server"
@@ -12,7 +12,7 @@ export function useStableQuery<TQuery extends FunctionReference<"query">>(
   ...args: OptionalRestArgsOrSkip<TQuery>
 ) {
   const result = useQuery(query, ...args)
-  const stored = useRef(result)
-  if (result !== undefined) stored.current = result
-  return args[0] === "skip" ? undefined : stored.current
+  const [stored, setStored] = useState(result)
+  if (result !== undefined && result !== stored) setStored(result)
+  return args[0] === "skip" ? undefined : (result ?? stored)
 }

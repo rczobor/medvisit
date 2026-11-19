@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useState } from "react"
 import { useMutation, useQuery } from "convex/react"
 import { CalendarClockIcon, DropletIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -50,6 +50,7 @@ import {
   sourceLabel,
   transitionLabel,
 } from "@/lib/labels"
+import { useLastPresent } from "@/hooks/use-last-present"
 
 export function AppointmentSheet({
   appointmentId,
@@ -58,9 +59,7 @@ export function AppointmentSheet({
   appointmentId: Id<"appointments"> | null
   onClose: () => void
 }) {
-  // Keep the last appointment while the sheet animates closed.
-  const shown = useRef(appointmentId)
-  if (appointmentId) shown.current = appointmentId
+  const shown = useLastPresent(appointmentId)
 
   return (
     <Sheet
@@ -68,7 +67,7 @@ export function AppointmentSheet({
       onOpenChange={(open) => !open && onClose()}
     >
       <SheetContent className="gap-0 data-[side=right]:sm:max-w-md">
-        {shown.current && <AppointmentDetails appointmentId={shown.current} />}
+        {shown && <AppointmentDetails appointmentId={shown} />}
       </SheetContent>
     </Sheet>
   )

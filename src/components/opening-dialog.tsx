@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { useMutation } from "convex/react"
 import { InfoIcon } from "lucide-react"
@@ -34,6 +34,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { formatDay } from "@/lib/format"
 import { errorMessage } from "@/lib/labels"
+import { useLastPresent } from "@/hooks/use-last-present"
 
 type Calendar = { _id: Id<"resources">; name: string }
 
@@ -51,9 +52,7 @@ export function OpeningDialog({
   calendars: Calendar[]
   onClose: () => void
 }) {
-  // Keep the last request while the dialog animates closed.
-  const shown = useRef(calendar)
-  if (calendar) shown.current = calendar
+  const shown = useLastPresent(calendar)
 
   return (
     <Dialog
@@ -61,10 +60,10 @@ export function OpeningDialog({
       onOpenChange={(open) => !open && onClose()}
     >
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
-        {shown.current && (
+        {shown && (
           <OpeningForm
-            key={shown.current._id}
-            initial={shown.current._id}
+            key={shown._id}
+            initial={shown._id}
             calendars={calendars}
             onDone={onClose}
           />

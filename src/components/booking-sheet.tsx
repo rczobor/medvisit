@@ -54,6 +54,7 @@ import {
   formatTimeRange,
 } from "@/lib/format"
 import { errorCode, errorMessage } from "@/lib/labels"
+import { useLastPresent } from "@/hooks/use-last-present"
 
 export type BookingRequest =
   | {
@@ -76,10 +77,8 @@ export function BookingSheet({
   onBooked: (date: LocalDate) => void
   onMoved: (appointmentId: Id<"appointments">, date: LocalDate) => void
 }) {
-  // Keep the last request while the sheet animates closed.
-  const shown = useRef(request)
-  if (request) shown.current = request
-  const moving = shown.current?.kind === "move"
+  const shown = useLastPresent(request)
+  const moving = shown?.kind === "move"
 
   return (
     <Sheet open={request !== null} onOpenChange={(open) => !open && onClose()}>
@@ -94,16 +93,14 @@ export function BookingSheet({
               : "A rögzített foglalás azonnal megjelenik a napi táblán."}
           </SheetDescription>
         </SheetHeader>
-        {shown.current?.kind === "move" ? (
+        {shown?.kind === "move" ? (
           <MoveForm
-            key={shown.current.appointmentId}
-            appointmentId={shown.current.appointmentId}
+            key={shown.appointmentId}
+            appointmentId={shown.appointmentId}
             onMoved={onMoved}
           />
         ) : (
-          shown.current && (
-            <BookingForm request={shown.current} onBooked={onBooked} />
-          )
+          shown && <BookingForm request={shown} onBooked={onBooked} />
         )}
       </SheetContent>
     </Sheet>
@@ -691,17 +688,15 @@ function SlotPicker({
     )
   }
 
-  let from = 0
-  const groups = dayParts.map((part) => {
-    const group = {
+  const groups = dayParts.map((part, index) => {
+    const from = dayParts[index - 1]?.until ?? 0
+    return {
       label: part.label,
       starts: starts.filter((start) => {
         const minutes = instantToZoned(start).minutes
         return minutes >= from && minutes < part.until
       }),
     }
-    from = part.until
-    return group
   })
 
   return (
