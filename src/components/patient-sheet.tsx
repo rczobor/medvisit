@@ -22,7 +22,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Spinner } from "@/components/ui/spinner"
-import { useStableQuery } from "@/hooks/use-stable-query"
+import { usePatientSearch } from "@/hooks/use-patient-search"
 import { formatDate, formatDay, formatTimeRange } from "@/lib/format"
 import { useLastPresent } from "@/hooks/use-last-present"
 
@@ -56,10 +56,7 @@ function PatientFinder() {
   const { openPatient } = useDesk()
   const [text, setText] = useState("")
   const searching = text.trim().length >= 2
-  const results = useStableQuery(
-    api.patients.search,
-    searching ? { text } : "skip"
-  )
+  const results = usePatientSearch(searching ? { text } : "skip")
 
   return (
     <>

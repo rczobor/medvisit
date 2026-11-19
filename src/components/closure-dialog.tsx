@@ -68,6 +68,12 @@ export function ClosureDialog({
   )
 }
 
+function affectedNotice(affected: number) {
+  return affected > 0
+    ? `${affected} foglalás esik erre az időre. Helyezze át vagy mondja le őket.`
+    : undefined
+}
+
 type Errors = Partial<Record<"reason" | "days" | "times" | "form", string>>
 
 function ClosureForm({
@@ -124,27 +130,24 @@ function ClosureForm({
     setErrors(found)
     if (Object.keys(found).length > 0 || startAt === undefined) return
     setSaving(true)
+    const resourceIds = everyCalendar
+      ? calendars.map((candidate) => candidate._id)
+      : [calendar._id]
     try {
       const { affected } = await addClosure({
-        resourceIds: everyCalendar
-          ? calendars.map((candidate) => candidate._id)
-          : [calendar._id],
+        resourceIds,
         startAt,
         endAt,
         reason: reason.trim(),
       })
       toast.success("Zárás rögzítve", {
-        description:
-          affected > 0
-            ? `${affected} foglalás esik erre az időre. Helyezze át vagy mondja le őket.`
-            : undefined,
+        description: affectedNotice(affected),
       })
       onDone()
     } catch (error) {
       setErrors({ form: errorMessage(error) })
-    } finally {
-      setSaving(false)
     }
+    setSaving(false)
   }
 
   return (

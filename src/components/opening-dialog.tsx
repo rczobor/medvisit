@@ -115,12 +115,13 @@ function OpeningForm({
     setErrors(found)
     if (Object.keys(found).length > 0 || !calendar) return
     setSaving(true)
+    const openingNote = note.trim() || undefined
     try {
       await addOpening({
         resourceId: calendar._id,
         startAt,
         endAt,
-        note: note.trim() || undefined,
+        note: openingNote,
       })
       toast.success("Rendelés megnyitva", {
         description: `${calendar.name}, ${formatDay(day, currentYear)}, ${fromTime}–${toTime}`,
@@ -138,9 +139,8 @@ function OpeningForm({
       onDone()
     } catch (error) {
       setErrors({ form: errorMessage(error) })
-    } finally {
-      setSaving(false)
     }
+    setSaving(false)
   }
 
   return (

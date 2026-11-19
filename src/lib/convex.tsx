@@ -35,6 +35,9 @@ export function ConvexClientProvider({
 }: {
   children: React.ReactNode
 }) {
+  // ConvexProviderWithClerk takes Clerk's `useAuth` hook as a prop, which
+  // React Compiler refuses to compile. This renders once at the root.
+  "use no memo"
   const [client] = useState(() => new ConvexReactClient(convexUrl()))
   if (clerkKey === null) {
     return <ConvexProvider client={client}>{children}</ConvexProvider>

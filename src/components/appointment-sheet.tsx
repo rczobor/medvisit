@@ -130,9 +130,8 @@ function AppointmentDetails({
       toast.success(historyLabel[to])
     } catch (error) {
       toast.error(errorMessage(error))
-    } finally {
-      setPending(null)
     }
+    setPending(null)
   }
 
   return (

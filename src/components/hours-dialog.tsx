@@ -172,9 +172,8 @@ function HoursForm({
       onDone()
     } catch (error) {
       setFormError(errorMessage(error))
-    } finally {
-      setSaving(false)
     }
+    setSaving(false)
   }
 
   return (

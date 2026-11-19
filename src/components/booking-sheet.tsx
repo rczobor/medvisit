@@ -45,7 +45,7 @@ import {
 } from "@/components/ui/sheet"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
-import { useStableQuery } from "@/hooks/use-stable-query"
+import { usePatientSearch } from "@/hooks/use-patient-search"
 import {
   formatDate,
   formatDay,
@@ -326,6 +326,9 @@ function BookingForm({
     if (!resource || !selectedService || start === null || !patient) return
     setSaving(true)
     setError(null)
+    const bookingNote = note.trim() || undefined
+    const done = moving ? "Foglalás áthelyezve" : "Foglalás rögzítve"
+    const description = `${patient.familyName} ${patient.givenName}, ${formatDay(date, currentYear)} ${formatTime(start)}`
     try {
       if (moving) {
         await reschedule({
@@ -339,19 +342,16 @@ function BookingForm({
           serviceId: selectedService._id,
           patientId: patient._id,
           startAt: start,
-          note: note.trim() || undefined,
+          note: bookingNote,
         })
       }
-      toast.success(moving ? "Foglalás áthelyezve" : "Foglalás rögzítve", {
-        description: `${patient.familyName} ${patient.givenName}, ${formatDay(date, currentYear)} ${formatTime(start)}`,
-      })
+      toast.success(done, { description })
       onBooked(date)
     } catch (caught) {
       setError(errorMessage(caught))
       if (errorCode(caught) === "SLOT_TAKEN") setPickedStart(null)
-    } finally {
-      setSaving(false)
     }
+    setSaving(false)
   }
 
   return (
@@ -749,10 +749,7 @@ function PatientSearch({
 }) {
   const [text, setText] = useState("")
   const results =
-    useStableQuery(
-      api.patients.search,
-      text.trim().length >= 2 ? { text } : "skip"
-    ) ?? []
+    usePatientSearch(text.trim().length >= 2 ? { text } : "skip") ?? []
 
   return (
     <div className="flex gap-2">

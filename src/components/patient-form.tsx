@@ -146,18 +146,18 @@ export function PatientForm({
       birthPlace: values.birthPlace || undefined,
       mothersName: values.mothersName || undefined,
     }
+    const summary = {
+      familyName: values.familyName.trim(),
+      givenName: values.givenName.trim(),
+      birthDate: values.birthDate,
+      taj: taj || null,
+      phone: values.phone.trim() || null,
+    }
+    let patientId = patient?._id
     try {
-      let patientId = patient?._id
       if (patientId) await update({ patientId, ...fields })
       else patientId = await create(fields)
-      onSaved({
-        _id: patientId,
-        familyName: values.familyName.trim(),
-        givenName: values.givenName.trim(),
-        birthDate: values.birthDate,
-        taj: taj || null,
-        phone: values.phone.trim() || null,
-      })
+      onSaved({ _id: patientId, ...summary })
     } catch (error) {
       const code = errorCode(error)
       setErrors(
@@ -165,10 +165,9 @@ export function PatientForm({
           ? { taj: errorMessage(error) }
           : { form: errorMessage(error) }
       )
-    } finally {
-      setSaving(false)
-      onSavingChange(false)
     }
+    setSaving(false)
+    onSavingChange(false)
   }
 
   return (
