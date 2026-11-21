@@ -4,7 +4,7 @@ name: medvisit
 
 services:
   convex-backend:
-    image: ${CONVEX_BACKEND_IMAGE:-ghcr.io/convex/convex-backend@sha256:e9c084e8bd6c1f249012c672193f0988c748824f55a24cdad45f6185a8462f9a}
+    image: ${CONVEX_BACKEND_IMAGE:-ghcr.io/convex/convex-backend@sha256:d4e012c68640830310139632481f8d1c1915bdf66de5c3a594a99799eab51679}
     restart: unless-stopped
     stop_grace_period: 10s
     stop_signal: SIGINT
