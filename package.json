@@ -2,7 +2,7 @@
   "name": "medvisit",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@12.20.0",
+  "packageManager": "pnpm@12.21.0",
   "engines": {
     "node": "^26.13.1"
   },
@@ -25,17 +25,17 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
-    "@clerk/localizations": "^4.24.7",
-    "@clerk/react": "^6.18.7",
+    "@clerk/localizations": "^4.25.0",
+    "@clerk/react": "^6.18.9",
     "@fontsource-variable/atkinson-hyperlegible-next": "^5.3.0",
     "@tailwindcss/vite": "^4.3.5",
     "@tanstack/react-router": "1.170.46",
     "@tanstack/react-start": "1.169.5",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.5.2",
-    "convex": "^1.49.0",
+    "convex": "^1.51.0",
     "date-fns": "^4.4.0",
-    "lucide-react": "^1.72.0",
+    "lucide-react": "^1.75.0",
     "next-themes": "^0.4.6",
     "react": "^19.3.1",
     "react-day-picker": "^10.0.2",
@@ -48,7 +48,7 @@
   "devDependencies": {
     "@babel/core": "^7.29.13",
     "@edge-runtime/vm": "^5.0.0",
-    "@playwright/test": "1.65.0",
+    "@playwright/test": "1.65.1",
     "@rolldown/plugin-babel": "^0.3.1",
     "@tanstack/eslint-config": "^0.5.0",
     "@types/node": "^26.6.6",
@@ -57,13 +57,13 @@
     "@typescript/native": "npm:typescript@^7.0.2",
     "@vitejs/plugin-react": "^6.3.0",
     "babel-plugin-react-compiler": "^1.0.0",
-    "convex-test": "^0.0.71",
-    "eslint": "^10.14.0",
+    "convex-test": "^0.0.72",
+    "eslint": "^10.15.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "prettier": "^3.10.1",
     "prettier-plugin-tailwindcss": "^0.8.1",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vite": "^8.3.8",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.1"
   }
 }
