@@ -25,8 +25,8 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
-    "@clerk/localizations": "^4.25.0",
-    "@clerk/react": "^6.18.9",
+    "@clerk/localizations": "^4.25.1",
+    "@clerk/react": "^6.19.0",
     "@fontsource-variable/atkinson-hyperlegible-next": "^5.3.0",
     "@tailwindcss/vite": "^4.3.5",
     "@tanstack/react-router": "1.170.46",
